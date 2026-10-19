@@ -1,0 +1,6 @@
+{
+  "name": "CITO UF SYSTEM - Điều Khiển Web Server & Kết Nối Phần Cứng",
+  "description": "Hệ thống giám sát và điều khiển máy lọc màng UF CITO qua Web Server thời gian thực, tích hợp P&ID SCADA, tài liệu đấu nối và mã nguồn nhúng ESP32/PLC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
