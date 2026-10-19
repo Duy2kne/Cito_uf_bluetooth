@@ -112,6 +112,21 @@ export class CitoBleManager {
     this.commandChar = null;
   }
 
+  public async readStatus(): Promise<any> {
+    if (!this.statusChar || !this.gattServer || !this.gattServer.connected) {
+      return null;
+    }
+    try {
+      const value = await this.statusChar.readValue();
+      const decoder = new TextDecoder('utf-8');
+      const jsonStr = decoder.decode(value);
+      return JSON.parse(jsonStr);
+    } catch (e) {
+      console.warn('Failed to read status over BLE:', e);
+      return null;
+    }
+  }
+
   public isConnected(): boolean {
     return !!(this.gattServer && this.gattServer.connected);
   }

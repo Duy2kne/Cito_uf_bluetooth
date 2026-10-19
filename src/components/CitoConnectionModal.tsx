@@ -33,6 +33,7 @@ interface CitoConnectionModalProps {
   onSetDevicePin: (pin: string) => void;
   wifiSsid?: string;
   onSaveWifi?: (ssid: string, pass: string) => void;
+  onDeviceStateUpdate?: (data: any) => void;
 }
 
 export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
@@ -48,13 +49,13 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
   onSetDevicePin,
   wifiSsid = '',
   onSaveWifi,
+  onDeviceStateUpdate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'connect' | 'wifi' | 'security' | 'firmware'>('connect');
+  const [activeTab, setActiveTab] = useState<'connect' | 'wifi' | 'security'>('connect');
   const [isScanning, setIsScanning] = useState(false);
   const [bleError, setBleError] = useState<string>('');
   const [pinInput, setPinInput] = useState(devicePin);
   const [pinSuccess, setPinSuccess] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
   const [modalWifiSsid, setModalWifiSsid] = useState(wifiSsid || '');
   const [modalWifiPass, setModalWifiPass] = useState('');
   const [modalWifiSaved, setModalWifiSaved] = useState(false);
@@ -70,7 +71,7 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
       if (isBleSupported) {
         const info = await bleManager.scanAndConnect(
           (telemetry) => {
-            console.log('BLE Telemetry received:', telemetry);
+            if (onDeviceStateUpdate) onDeviceStateUpdate(telemetry);
           },
           () => {
             onBleDisconnect();
@@ -102,119 +103,6 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
     setPinSuccess(true);
     setTimeout(() => setPinSuccess(false), 2000);
   };
-
-  const esp32BleFirmwareCode = `/*
- * ==============================================================================
- * CITO UF SYSTEM — TÍCH HỢP BLUETOOTH LOW ENERGY (BLE) CHO ESP32
- * Giúp người dùng quét và điều khiển thiết bị ở cự ly gần (<10m)
- * Bảo mật 100% - Ngăn chặn người lạ ở xa điều khiển máy!
- * ==============================================================================
- */
-
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-#include <ArduinoJson.h>
-
-// UUID chuẩn dịch vụ CITO UF (Trùng khớp với Web Bluetooth)
-#define CITO_SERVICE_UUID       "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CITO_CHAR_STATUS_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26a8" // Notify
-#define CITO_CHAR_COMMAND_UUID  "cba1d466-344c-4be3-ab3f-189f80dd7518" // Write
-
-BLEServer* pServer = NULL;
-BLECharacteristic* pStatusChar = NULL;
-BLECharacteristic* pCommandChar = NULL;
-bool deviceConnected = false;
-
-// Tên phát Bluetooth riêng biệt cho máy khách hàng (Ví dụ: CITO-UF-TUAN hoặc CITO-UF-001)
-const char* BLE_DEVICE_NAME = "CITO-UF-001";
-
-// Callback nhận lệnh điều khiển trực tiếp từ Web Bluetooth
-class CommandCallbacks: public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) {
-    String rxValue = pCharacteristic->getValue().c_str();
-    if (rxValue.length() > 0) {
-      Serial.print("[BLE NHẬN LỆNH]: ");
-      Serial.println(rxValue);
-      
-      StaticJsonDocument<256> doc;
-      if (!deserializeJson(doc, rxValue)) {
-        String action = doc["a"]; // Tên hành động
-        if (action == "TOGGLE_FILTER") {
-          // Bật/tắt lọc ngay tức thì trên máy này!
-        } else if (action == "TOGGLE_FLUSH") {
-          // Bật/tắt xả nước
-        } else if (action == "SET_TDS_MODE") {
-          // Đổi chế độ nuôi Tép / Cá / Cây
-        }
-      }
-    }
-  }
-};
-
-class ServerCallbacks: public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer) {
-    deviceConnected = true;
-    Serial.println("[BLE] Người dùng đã kết nối Bluetooth với máy!");
-  }
-  void onDisconnect(BLEServer* pServer) {
-    deviceConnected = false;
-    Serial.println("[BLE] Đã ngắt kết nối Bluetooth.");
-    // Phát lại quảng cáo để thiết bị khác hoặc kết nối lại
-    pServer->startAdvertising();
-  }
-};
-
-void setupBLE() {
-  BLEDevice::init(BLE_DEVICE_NAME);
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new ServerCallbacks());
-
-  BLEService *pService = pServer->createService(CITO_SERVICE_UUID);
-
-  // Characteristic gửi trạng thái TDS & Nhiệt độ
-  pStatusChar = pService->createCharacteristic(
-    CITO_CHAR_STATUS_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pStatusChar->addDescriptor(new BLE2902());
-
-  // Characteristic nhận lệnh từ Web
-  pCommandChar = pService->createCharacteristic(
-    CITO_CHAR_COMMAND_UUID,
-    BLECharacteristic::PROPERTY_WRITE
-  );
-  pCommandChar->setCallbacks(new CommandCallbacks());
-
-  pService->start();
-
-  // Bắt đầu phát sóng Bluetooth
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(CITO_SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  BLEDevice::startAdvertising();
-
-  Serial.println("[BLE SẴN SÀNG] Đang phát Bluetooth: " + String(BLE_DEVICE_NAME));
-}
-
-// Hàm gửi dữ liệu TDS & Nhiệt độ tới điện thoại qua Bluetooth mỗi 1-2s
-void sendBleTelemetry(int tds, float temp, bool filtering, bool flushing) {
-  if (deviceConnected && pStatusChar != NULL) {
-    StaticJsonDocument<128> doc;
-    doc["tds"] = tds;
-    doc["temp"] = temp;
-    doc["flt"] = filtering ? 1 : 0;
-    doc["flu"] = flushing ? 1 : 0;
-    
-    String jsonStr;
-    serializeJson(doc, jsonStr);
-    pStatusChar->setValue(jsonStr.c_str());
-    pStatusChar->notify(); // Bắn thông báo về Web
-  }
-}
-`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
@@ -279,18 +167,6 @@ void sendBleTelemetry(int tds, float temp, bool filtering, bool flushing) {
           >
             <ShieldCheck className="w-4 h-4" />
             <span>3. Mã PIN Bảo Mật</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('firmware')}
-            className={`py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'firmware'
-                ? 'bg-cyan-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Code className="w-4 h-4" />
-            <span>4. Mã Nguồn ESP32</span>
           </button>
         </div>
 
@@ -553,33 +429,6 @@ void sendBleTelemetry(int tds, float temp, bool filtering, bool flushing) {
                     </div>
                   )}
                 </form>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 3: ESP32 BLE CODE ================= */}
-          {activeTab === 'firmware' && (
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 font-mono">
-                  Mã nguồn C++ Arduino BLE Server nạp vào ESP32
-                </span>
-
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(esp32BleFirmwareCode);
-                    setCopiedCode(true);
-                    setTimeout(() => setCopiedCode(false), 2000);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center gap-1.5"
-                >
-                  {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedCode ? 'Đã sao chép!' : 'Sao Chép Mã'}</span>
-                </button>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-[11px] text-cyan-200/90 overflow-x-auto max-h-[350px] leading-relaxed">
-                <pre>{esp32BleFirmwareCode}</pre>
               </div>
             </div>
           )}

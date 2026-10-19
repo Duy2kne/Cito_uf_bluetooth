@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -25,6 +25,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
   const [holdingBtn, setHoldingBtn] = useState<string | null>(null);
   const [holdStage, setHoldStage] = useState<string>(''); // '', '-', '--', '---'
   const [holdTimer, setHoldTimer] = useState<any>(null);
+  const hasTriggeredRef = useRef(false);
 
   const {
     isFiltering,
@@ -39,9 +40,9 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
     isDryRun,
   } = state;
 
-  // LED states
+  // LED states: Lọc chỉ sáng/chớp khi isFiltering đang hoạt động; khi Tắt lọc thì đèn LỌC phải tắt!
   const isFilterLedOn = isFiltering;
-  const isFilterLedBlinking = activeErrors.flt_dirtyFilter;
+  const isFilterLedBlinking = isFiltering && activeErrors.flt_dirtyFilter;
   const isFlushLedOn = isFlushing;
   const isErr1Blinking =
     activeErrors.err111_pumpNoCurrent ||
@@ -59,20 +60,28 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
   // LED Screen visibility: Hidden if night mode is ON, or if sleeping and screenWhenSleeping is FALSE
   const isDisplayOff = nightMode || (isSleeping && !screenWhenSleeping);
 
-  // Touch button handler with realistic hold detection (- -> -- -> --- + action)
+  // Touch button handler with realistic hold detection (- -> -- -> --- + auto trigger on 850ms)
   const handleTouchStart = (key: string) => {
+    hasTriggeredRef.current = false;
     setHoldingBtn(key);
     setHoldStage('-');
 
     const timer1 = setTimeout(() => {
       setHoldStage('--');
-    }, 400);
+    }, 300);
 
     const timer2 = setTimeout(() => {
       setHoldStage('---');
-    }, 900);
+    }, 600);
 
-    setHoldTimer({ timer1, timer2, startTime: Date.now() });
+    // Kích hoạt ngay khi giữ đủ thời gian (850ms) mà người dùng không cần phải nhả tay mới ăn lệnh
+    const timer3 = setTimeout(() => {
+      hasTriggeredRef.current = true;
+      setHoldStage('');
+      onAction('TOUCH_KEY', { key });
+    }, 850);
+
+    setHoldTimer({ timer1, timer2, timer3, startTime: Date.now() });
   };
 
   const handleTouchEnd = (key: string) => {
@@ -81,6 +90,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
     if (holdTimer) {
       clearTimeout(holdTimer.timer1);
       clearTimeout(holdTimer.timer2);
+      clearTimeout(holdTimer.timer3);
     }
     setHoldingBtn(null);
     setHoldStage('');
@@ -103,10 +113,21 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
       return;
     }
 
-    // Normal button trigger (held for >= 800ms according to Section 2, 4)
-    if (holdDuration >= 700 || state.buttonHoldSeconds === 0) {
+    // Nếu nhả ra sớm (click/chạm thông thường), kích hoạt lệnh ngay tức khắc
+    if (!hasTriggeredRef.current) {
+      hasTriggeredRef.current = true;
       onAction('TOUCH_KEY', { key });
     }
+  };
+
+  const handleTouchCancel = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer.timer1);
+      clearTimeout(holdTimer.timer2);
+      clearTimeout(holdTimer.timer3);
+    }
+    setHoldingBtn(null);
+    setHoldStage('');
   };
 
   return (
@@ -177,8 +198,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
             <button
               onMouseDown={() => handleTouchStart('LOC')}
               onMouseUp={() => handleTouchEnd('LOC')}
+              onMouseLeave={handleTouchCancel}
               onTouchStart={() => handleTouchStart('LOC')}
               onTouchEnd={() => handleTouchEnd('LOC')}
+              onTouchCancel={handleTouchCancel}
               className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
                 holdingBtn === 'LOC'
                   ? 'bg-cyan-500/30 border-cyan-400 text-white'
@@ -209,8 +232,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
             <button
               onMouseDown={() => handleTouchStart('XA')}
               onMouseUp={() => handleTouchEnd('XA')}
+              onMouseLeave={handleTouchCancel}
               onTouchStart={() => handleTouchStart('XA')}
               onTouchEnd={() => handleTouchEnd('XA')}
+              onTouchCancel={handleTouchCancel}
               className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
                 holdingBtn === 'XA'
                   ? 'bg-amber-500/30 border-amber-400 text-white'
@@ -313,8 +338,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
                 <button
                   onMouseDown={() => handleTouchStart(modeKey)}
                   onMouseUp={() => handleTouchEnd(modeKey)}
+                  onMouseLeave={handleTouchCancel}
                   onTouchStart={() => handleTouchStart(modeKey)}
                   onTouchEnd={() => handleTouchEnd(modeKey)}
+                  onTouchCancel={handleTouchCancel}
                   className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
                     holdingBtn === modeKey
                       ? 'bg-blue-500/30 border-blue-400 text-white'
@@ -350,8 +377,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
             <button
               onMouseDown={() => handleTouchStart('SETTING')}
               onMouseUp={() => handleTouchEnd('SETTING')}
+              onMouseLeave={handleTouchCancel}
               onTouchStart={() => handleTouchStart('SETTING')}
               onTouchEnd={() => handleTouchEnd('SETTING')}
+              onTouchCancel={handleTouchCancel}
               className={`w-full py-2.5 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
                 holdingBtn === 'SETTING'
                   ? 'bg-purple-500/30 border-purple-400 text-white'
@@ -397,8 +426,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
             <button
               onMouseDown={() => handleTouchStart('OK')}
               onMouseUp={() => handleTouchEnd('OK')}
+              onMouseLeave={handleTouchCancel}
               onTouchStart={() => handleTouchStart('OK')}
               onTouchEnd={() => handleTouchEnd('OK')}
+              onTouchCancel={handleTouchCancel}
               className={`w-full py-2.5 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
                 holdingBtn === 'OK'
                   ? 'bg-emerald-500/30 border-emerald-400 text-white'

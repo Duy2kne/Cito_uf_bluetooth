@@ -129,7 +129,8 @@ const INITIAL_CITO_STATE: CitoSystemState = {
 export default function App() {
   const [state, setState] = useState<CitoSystemState>(INITIAL_CITO_STATE);
 
-  // Bluetooth & Security State
+  // Connection & Hardware Telemetry State
+  const [isRealHardware, setIsRealHardware] = useState(false);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [connectionMode, setConnectionMode] = useState<'BLE' | 'WIFI_LOCAL' | 'SERVER'>('BLE');
   const [bleConnected, setBleConnected] = useState(false);
@@ -139,8 +140,47 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'panel' | 'web'>('panel');
   const [networkError, setNetworkError] = useState(false);
 
-  // Poll state from server every 1000ms
+  // Poll state: In real mode, reads from BLE or ESP32 hardware; in simulation mode, reads from simulated server
   const fetchState = async () => {
+    // 1. If BLE connected to real ESP32, read telemetry directly via Web Bluetooth
+    if (bleConnected && bleManager.isConnected()) {
+      try {
+        const liveBleData = await bleManager.readStatus();
+        if (liveBleData) {
+          setState((prev) => ({
+            ...prev,
+            ...liveBleData,
+            activeErrors: {
+              ...prev.activeErrors,
+              ...(liveBleData.activeErrors || {}),
+            },
+          }));
+          setNetworkError(false);
+          return;
+        }
+      } catch (e) {
+        // Continue to server fallback
+      }
+    }
+
+    // 2. If Real Hardware Mode active, fetch directly from real ESP32 IP
+    if (isRealHardware && !bleConnected) {
+      try {
+        const res = await fetch(`/api/proxy/esp32-status?ip=${state.deviceIp}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.state) {
+            setState(data.state);
+            setNetworkError(false);
+            return;
+          }
+        }
+      } catch (e) {
+        // Fallback to server status
+      }
+    }
+
+    // 3. Fallback / Simulation mode poll
     try {
       const res = await fetch('/api/status');
       if (!res.ok) throw new Error('Network error');
@@ -156,11 +196,65 @@ export default function App() {
     fetchState();
     const timer = setInterval(fetchState, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [bleConnected, isRealHardware, state.deviceIp]);
 
-  // Execute action on server and directly over BLE if connected
+  // Execute action with optimistic UI update and dispatch to BLE / Server
   const sendAction = async (action: string, payload: any = {}) => {
-    // If connected via BLE, send command directly over Bluetooth GATT!
+    // Optimistic local state update for instant UI feedback (bật/tắt lọc không có độ trễ)
+    if (action === 'TOGGLE_FILTER' || (action === 'TOUCH_KEY' && payload?.key === 'LOC')) {
+      setState((prev) => {
+        const nextFiltering = !prev.isFiltering;
+        return {
+          ...prev,
+          isFiltering: nextFiltering,
+          pumpCurrentMa: nextFiltering ? (prev.pumpType === 'SMALL' ? 210 : 310) : 0,
+          displayHoldingState: nextFiltering ? 'LOC' : 'OFF',
+          activeErrors: {
+            ...prev.activeErrors,
+            flt_dirtyFilter: nextFiltering ? prev.activeErrors.flt_dirtyFilter : false,
+          },
+        };
+      });
+      setTimeout(() => {
+        setState((prev) => ({
+          ...prev,
+          displayHoldingState:
+            prev.displayHoldingState === 'OFF' || prev.displayHoldingState === 'LOC'
+              ? ''
+              : prev.displayHoldingState,
+        }));
+      }, 1200);
+    } else if (action === 'TOGGLE_FLUSH' || (action === 'TOUCH_KEY' && payload?.key === 'XA')) {
+      setState((prev) => ({
+        ...prev,
+        isFlushing: !prev.isFlushing,
+        drainValveCurrentMa: !prev.isFlushing ? 310 : 0,
+        displayHoldingState: !prev.isFlushing ? 'XA' : 'OFF',
+      }));
+      setTimeout(() => {
+        setState((prev) => ({
+          ...prev,
+          displayHoldingState:
+            prev.displayHoldingState === 'XA' || prev.displayHoldingState === 'OFF'
+              ? ''
+              : prev.displayHoldingState,
+        }));
+      }, 1200);
+    } else if (action === 'TOUCH_KEY' && ['TEP', 'CA', 'CAY', 'CUSTOM'].includes(payload?.key)) {
+      setState((prev) => ({
+        ...prev,
+        tdsMode: prev.tdsMode === payload.key ? 'OFF' : payload.key,
+        displayHoldingState: prev.tdsMode === payload.key ? 'OFF' : payload.key,
+      }));
+      setTimeout(() => {
+        setState((prev) => ({
+          ...prev,
+          displayHoldingState: '',
+        }));
+      }, 1200);
+    }
+
+    // If connected via BLE, send command directly over Bluetooth GATT to real ESP32!
     if (bleConnected && bleManager.isConnected()) {
       try {
         await bleManager.sendCommand(action, payload);
@@ -228,6 +322,40 @@ export default function App() {
 
           {/* Right: Bluetooth BLE Scan Button & Metrics */}
           <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
+            {/* Real Hardware vs Simulation Mode Selector */}
+            <div className="flex items-center rounded-xl p-1 bg-slate-950 border border-slate-800 text-xs font-bold">
+              <button
+                onClick={() => setIsRealHardware(false)}
+                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                  !isRealHardware
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Chạy mô phỏng trên trình duyệt để thử nghiệm"
+              >
+                <span>🟡 Giả Lập</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsRealHardware(true);
+                  if (!bleConnected) setIsConnectModalOpen(true);
+                }}
+                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                  isRealHardware
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Đọc dữ liệu và điều khiển thiết bị ESP32 thật"
+              >
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    bleConnected ? 'bg-emerald-400 animate-ping' : 'bg-emerald-400'
+                  }`}
+                />
+                <span>🟢 Thiết Bị Thật</span>
+              </button>
+            </div>
+
             {/* Bluetooth BLE Scan Button */}
             <button
               onClick={() => setIsConnectModalOpen(true)}
@@ -303,10 +431,22 @@ export default function App() {
         onBleConnectSuccess={(name) => {
           setBleConnected(true);
           setBleDeviceName(name);
+          setIsRealHardware(true);
         }}
         onBleDisconnect={() => {
           setBleConnected(false);
           setBleDeviceName('');
+        }}
+        onDeviceStateUpdate={(telemetry) => {
+          setIsRealHardware(true);
+          setState((prev) => ({
+            ...prev,
+            ...telemetry,
+            activeErrors: {
+              ...prev.activeErrors,
+              ...(telemetry.activeErrors || {}),
+            },
+          }));
         }}
         devicePin={devicePin}
         onSetDevicePin={setDevicePin}
@@ -352,15 +492,17 @@ export default function App() {
           </nav>
 
           <div className="hidden md:flex items-center gap-3 text-xs text-slate-400 font-mono">
-            {bleConnected ? (
+            {isRealHardware ? (
               <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>KẾT NỐI BLE TRỰC TIẾP (BẢO MẬT RIÊNG TƯ)</span>
+                <span>
+                  THIẾT BỊ THẬT ({bleConnected ? `BLE: ${bleDeviceName || 'Live'}` : `ESP32 IP: ${state.deviceIp}`})
+                </span>
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
+              <span className="flex items-center gap-1.5 text-amber-400 font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>KẾT NỐI MÁY RIÊNG (LOCAL)</span>
+                <span>CHẾ ĐỘ GIẢ LẬP (MÔ PHỎNG ẢO)</span>
               </span>
             )}
             <span>•</span>

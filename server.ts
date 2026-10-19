@@ -232,8 +232,8 @@ setInterval(() => {
     const isDrainOpen = s.isFlushing || s.isPressureRelease;
 
     if (isPumpRunning && !s.activeErrors.err222_pumpOverCurrent) {
-      const baseMa = s.pumpType === 'SMALL' ? 520 : 980;
-      s.pumpCurrentMa = Math.round(baseMa + (Math.random() * 30 - 15));
+      const baseMa = s.pumpType === 'SMALL' ? 210 : 310;
+      s.pumpCurrentMa = Math.round(baseMa + (Math.random() * 20 - 10));
       const dirtyLimit = s.pumpType === 'SMALL' ? s.pumpThresholdsSmall.dirtyFilterMa : s.pumpThresholdsLarge.dirtyFilterMa;
       if (s.pumpCurrentMa > dirtyLimit) {
         s.activeErrors.flt_dirtyFilter = true;
@@ -455,8 +455,19 @@ async function startServer() {
           state.manualFilterCountdown = 0;
           state.isManualFilter = true;
           state.filterMode = 100;
+          state.pumpCurrentMa = state.pumpType === 'SMALL' ? 210 : 310;
+          state.displayHoldingState = 'LOC';
+          setTimeout(() => {
+            if (state.displayHoldingState === 'LOC') state.displayHoldingState = '';
+          }, 1200);
         } else {
+          state.pumpCurrentMa = 0;
+          state.activeErrors.flt_dirtyFilter = false;
+          state.displayHoldingState = 'OFF';
           if (state.filterMode === 100) state.manualFilterCountdown = 30;
+          setTimeout(() => {
+            if (state.displayHoldingState === 'OFF') state.displayHoldingState = '';
+          }, 1200);
         }
         break;
       }
@@ -632,15 +643,50 @@ async function startServer() {
         const key = payload.key;
         if (key === 'LOC') {
           state.isFiltering = !state.isFiltering;
-          if (!state.isFiltering && state.filterMode === 100) state.manualFilterCountdown = 30;
+          if (state.isFiltering) {
+            state.manualFilterCountdown = 0;
+            state.isManualFilter = true;
+            state.filterMode = 100;
+            state.pumpCurrentMa = state.pumpType === 'SMALL' ? 210 : 310;
+            state.displayHoldingState = 'LOC';
+            setTimeout(() => {
+              if (state.displayHoldingState === 'LOC') state.displayHoldingState = '';
+            }, 1200);
+          } else {
+            state.pumpCurrentMa = 0;
+            state.activeErrors.flt_dirtyFilter = false;
+            state.displayHoldingState = 'OFF';
+            if (state.filterMode === 100) state.manualFilterCountdown = 30;
+            setTimeout(() => {
+              if (state.displayHoldingState === 'OFF') state.displayHoldingState = '';
+            }, 1200);
+          }
         } else if (key === 'XA') {
           state.isFlushing = !state.isFlushing;
+          state.displayHoldingState = state.isFlushing ? 'XA' : 'OFF';
+          setTimeout(() => {
+            if (state.displayHoldingState === 'XA' || state.displayHoldingState === 'OFF') {
+              state.displayHoldingState = '';
+            }
+          }, 1200);
         } else if (key === 'TEP' || key === 'CA' || key === 'CAY' || key === 'CUSTOM') {
           state.tdsMode = state.tdsMode === key ? 'OFF' : key;
+          state.displayHoldingState = state.tdsMode;
+          setTimeout(() => {
+            if (state.displayHoldingState === state.tdsMode) state.displayHoldingState = '';
+          }, 1200);
         } else if (key === 'OK') {
           state.activeErrors.err222_pumpOverCurrent = false;
           state.activeErrors.err666_drainOverCurrent = false;
           state.activeErrors.flt_dirtyFilter = false;
+          state.activeErrors.err111_pumpNoCurrent = false;
+          state.activeErrors.err555_drainNoCurrent = false;
+          state.activeErrors.err333_filterValveBlocked = false;
+          state.activeErrors.err444_drainNoFlow = false;
+          state.displayHoldingState = 'OK';
+          setTimeout(() => {
+            if (state.displayHoldingState === 'OK') state.displayHoldingState = '';
+          }, 1000);
         }
         break;
       }
@@ -684,9 +730,22 @@ async function startServer() {
     });
   });
 
-  // 8. Microcontroller Telemetry Upload
+  // 8. Microcontroller Telemetry Upload from real ESP32
   app.post('/api/device/telemetry', (req: Request, res: Response) => {
-    const { deviceId, tds, temp, pumpCurrentMa, drainCurrentMa, filterFlow, drainFlow } = req.body;
+    const {
+      deviceId,
+      tds,
+      temp,
+      pumpCurrentMa,
+      drainCurrentMa,
+      filterFlow,
+      drainFlow,
+      isFiltering,
+      isFlushing,
+      activeErrors,
+      tdsMode,
+      filterMode,
+    } = req.body;
     const devId = deviceId || (req.headers['x-device-id'] as string) || activeDeviceId;
     const dev = devices[devId] || devices[activeDeviceId];
 
@@ -700,10 +759,57 @@ async function startServer() {
       if (drainCurrentMa !== undefined) s.drainValveCurrentMa = Number(drainCurrentMa);
       if (filterFlow !== undefined) s.filterFlowRate = Boolean(filterFlow);
       if (drainFlow !== undefined) s.drainFlowRate = Boolean(drainFlow);
-      return res.json({ success: true, deviceId: dev.id, state: s });
+      if (isFiltering !== undefined) s.isFiltering = Boolean(isFiltering);
+      if (isFlushing !== undefined) s.isFlushing = Boolean(isFlushing);
+      if (tdsMode !== undefined) s.tdsMode = tdsMode;
+      if (filterMode !== undefined) s.filterMode = filterMode;
+      if (activeErrors) s.activeErrors = { ...s.activeErrors, ...activeErrors };
+      return res.json({ success: true, deviceId: dev.id, state: s, source: 'real-hardware' });
     }
 
     res.status(404).json({ error: 'Device not found' });
+  });
+
+  // 9. Full Hardware Status Sync from real ESP32
+  app.post('/api/device/status', (req: Request, res: Response) => {
+    const devId = req.body.deviceId || (req.headers['x-device-id'] as string) || activeDeviceId;
+    const dev = devices[devId] || devices[activeDeviceId];
+    if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+    dev.lastSeen = Date.now();
+    dev.isOnline = true;
+    dev.state = {
+      ...dev.state,
+      ...req.body,
+      activeErrors: {
+        ...dev.state.activeErrors,
+        ...(req.body.activeErrors || {}),
+      },
+    };
+    return res.json({ success: true, state: dev.state, source: 'real-hardware' });
+  });
+
+  // 10. Local ESP32 Network Proxy
+  app.get('/api/proxy/esp32-status', async (req: Request, res: Response) => {
+    const ip = (req.query.ip as string) || '192.168.1.108';
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      const espRes = await fetch(`http://${ip}/api/status`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (espRes.ok) {
+        const data = await espRes.json();
+        if (devices[activeDeviceId]) {
+          devices[activeDeviceId].state = { ...devices[activeDeviceId].state, ...data };
+          devices[activeDeviceId].lastSeen = Date.now();
+          devices[activeDeviceId].isOnline = true;
+        }
+        return res.json({ success: true, realHardware: true, state: devices[activeDeviceId].state });
+      }
+    } catch (e) {
+      // Offline or unreachable
+    }
+    return res.json({ success: false, message: 'ESP32 not reachable at ' + ip });
   });
 
   // Mount Vite
