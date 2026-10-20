@@ -15,7 +15,7 @@ import { CitoConnectionModal } from './components/CitoConnectionModal';
 import { CitoPhysicalPanel } from './components/CitoPhysicalPanel';
 import { CitoWebDashboard } from './components/CitoWebDashboard';
 import { applyBlePacket, bleManager } from './services/bleService';
-import { CitoSystemState, getTdsModeLabel } from './types/system';
+import { CitoSystemState, formatTemperature, getTdsModeLabel } from './types/system';
 
 const INITIAL_CITO_STATE: CitoSystemState = {
   isFiltering: false,
@@ -355,7 +355,9 @@ export default function App() {
 
               <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
                 <Thermometer className="w-3.5 h-3.5 text-blue-400" />
-                <span className="font-bold text-blue-300">{state.temperature}°C</span>
+                <span className={`font-bold ${state.temperatureState === 'ERROR' ? 'text-red-400' : 'text-blue-300'}`}>
+                  {formatTemperature(state)}
+                </span>
               </div>
 
               <div className="hidden md:flex bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 items-center gap-1.5">
