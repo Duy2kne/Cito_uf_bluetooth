@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -14,7 +14,7 @@ import {
 import { CitoConnectionModal } from './components/CitoConnectionModal';
 import { CitoPhysicalPanel } from './components/CitoPhysicalPanel';
 import { CitoWebDashboard } from './components/CitoWebDashboard';
-import { bleManager } from './services/bleService';
+import { applyBlePacket, bleManager } from './services/bleService';
 import { CitoSystemState, getTdsModeLabel } from './types/system';
 
 const INITIAL_CITO_STATE: CitoSystemState = {
@@ -129,66 +129,47 @@ const INITIAL_CITO_STATE: CitoSystemState = {
 export default function App() {
   const [state, setState] = useState<CitoSystemState>(INITIAL_CITO_STATE);
 
-  // Connection & Hardware Telemetry State
-  const [isRealHardware, setIsRealHardware] = useState(false);
+  // Bluetooth & Security State
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [connectionMode, setConnectionMode] = useState<'BLE' | 'WIFI_LOCAL' | 'SERVER'>('BLE');
   const [bleConnected, setBleConnected] = useState(false);
   const [bleDeviceName, setBleDeviceName] = useState('');
-  const [devicePin, setDevicePin] = useState('1234');
+  const [devicePin, setDevicePin] = useState(() => {
+    try {
+      return localStorage.getItem('cito_ble_pin') || '1234';
+    } catch {
+      return '1234';
+    }
+  });
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const bleConnectedRef = useRef(false);
+  bleConnectedRef.current = bleConnected;
 
   const [activeTab, setActiveTab] = useState<'panel' | 'web'>('panel');
   const [networkError, setNetworkError] = useState(false);
+  // Server mô phỏng (server.ts): null = đang dò, true = có (npm run dev), false = không có
+  // (web tĩnh trên GitHub Pages -> chỉ điều khiển máy thật qua Bluetooth)
+  const [hasSimulator, setHasSimulator] = useState<boolean | null>(null);
+  const simRef = useRef<boolean | null>(null);
 
-  // Poll state: In real mode, reads from BLE or ESP32 hardware; in simulation mode, reads from simulated server
+  // Poll state from server every 1000ms (chỉ khi chưa nối máy thật qua Bluetooth -> chế độ mô phỏng)
   const fetchState = async () => {
-    // 1. If BLE connected to real ESP32, read telemetry directly via Web Bluetooth
-    if (bleConnected && bleManager.isConnected()) {
-      try {
-        const liveBleData = await bleManager.readStatus();
-        if (liveBleData) {
-          setState((prev) => ({
-            ...prev,
-            ...liveBleData,
-            activeErrors: {
-              ...prev.activeErrors,
-              ...(liveBleData.activeErrors || {}),
-            },
-          }));
-          setNetworkError(false);
-          return;
-        }
-      } catch (e) {
-        // Continue to server fallback
-      }
-    }
-
-    // 2. If Real Hardware Mode active, fetch directly from real ESP32 IP
-    if (isRealHardware && !bleConnected) {
-      try {
-        const res = await fetch(`/api/proxy/esp32-status?ip=${state.deviceIp}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.state) {
-            setState(data.state);
-            setNetworkError(false);
-            return;
-          }
-        }
-      } catch (e) {
-        // Fallback to server status
-      }
-    }
-
-    // 3. Fallback / Simulation mode poll
+    if (bleConnectedRef.current || simRef.current === false) return;
     try {
-      const res = await fetch('/api/status');
+      const res = await fetch('api/status');
       if (!res.ok) throw new Error('Network error');
-      const data = await res.json();
+      const data = await res.json(); // GitHub Pages trả trang 404 HTML -> lỗi parse -> không có server
       setState(data);
+      simRef.current = true;
+      setHasSimulator(true);
       setNetworkError(false);
     } catch (err) {
-      setNetworkError(true);
+      if (simRef.current === null) {
+        simRef.current = false;
+        setHasSimulator(false);
+      } else {
+        setNetworkError(true);
+      }
     }
   };
 
@@ -196,75 +177,70 @@ export default function App() {
     fetchState();
     const timer = setInterval(fetchState, 1000);
     return () => clearInterval(timer);
-  }, [bleConnected, isRealHardware, state.deviceIp]);
+  }, []);
 
-  // Execute action with optimistic UI update and dispatch to BLE / Server
-  const sendAction = async (action: string, payload: any = {}) => {
-    // Optimistic local state update for instant UI feedback (bật/tắt lọc không có độ trễ)
-    if (action === 'TOGGLE_FILTER' || (action === 'TOUCH_KEY' && payload?.key === 'LOC')) {
-      setState((prev) => {
-        const nextFiltering = !prev.isFiltering;
-        return {
-          ...prev,
-          isFiltering: nextFiltering,
-          pumpCurrentMa: nextFiltering ? (prev.pumpType === 'SMALL' ? 210 : 310) : 0,
-          displayHoldingState: nextFiltering ? 'LOC' : 'OFF',
-          activeErrors: {
-            ...prev.activeErrors,
-            flt_dirtyFilter: nextFiltering ? prev.activeErrors.flt_dirtyFilter : false,
-          },
-        };
-      });
-      setTimeout(() => {
-        setState((prev) => ({
-          ...prev,
-          displayHoldingState:
-            prev.displayHoldingState === 'OFF' || prev.displayHoldingState === 'LOC'
-              ? ''
-              : prev.displayHoldingState,
-        }));
-      }, 1200);
-    } else if (action === 'TOGGLE_FLUSH' || (action === 'TOUCH_KEY' && payload?.key === 'XA')) {
-      setState((prev) => ({
-        ...prev,
-        isFlushing: !prev.isFlushing,
-        drainValveCurrentMa: !prev.isFlushing ? 310 : 0,
-        displayHoldingState: !prev.isFlushing ? 'XA' : 'OFF',
-      }));
-      setTimeout(() => {
-        setState((prev) => ({
-          ...prev,
-          displayHoldingState:
-            prev.displayHoldingState === 'XA' || prev.displayHoldingState === 'OFF'
-              ? ''
-              : prev.displayHoldingState,
-        }));
-      }, 1200);
-    } else if (action === 'TOUCH_KEY' && ['TEP', 'CA', 'CAY', 'CUSTOM'].includes(payload?.key)) {
-      setState((prev) => ({
-        ...prev,
-        tdsMode: prev.tdsMode === payload.key ? 'OFF' : payload.key,
-        displayHoldingState: prev.tdsMode === payload.key ? 'OFF' : payload.key,
-      }));
-      setTimeout(() => {
-        setState((prev) => ({
-          ...prev,
-          displayHoldingState: '',
-        }));
-      }, 1200);
+  // Telemetry & kết quả lệnh từ máy thật (Bluetooth)
+  useEffect(() => {
+    bleManager.setListeners(
+      (pkt) => setState((prev) => applyBlePacket(prev, pkt)),
+      (ack) => {
+        if (ack.a === 'AUTH') {
+          setNotice(ack.ok ? { text: 'Đã xác thực mã PIN', ok: true } : { text: 'Sai mã PIN - nhập lại ở mục "Mã PIN Bảo Mật"', ok: false });
+        } else if (!ack.ok || ack.msg) {
+          setNotice({ text: ack.msg || `Lệnh ${ack.a} thất bại`, ok: ack.ok });
+        }
+      }
+    );
+  }, []);
+
+  useEffect(() => {
+    bleManager.setPin(devicePin);
+    try {
+      localStorage.setItem('cito_ble_pin', devicePin);
+    } catch {
+      /* private mode: chỉ nhớ PIN trong phiên */
     }
+  }, [devicePin]);
 
-    // If connected via BLE, send command directly over Bluetooth GATT to real ESP32!
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Đổi PIN: nếu đang nối máy thì đổi luôn trên máy (máy đang ở phiên đã xác thực)
+  const handleSetDevicePin = async (pin: string) => {
+    if (bleConnected && bleManager.isConnected()) {
+      try {
+        await bleManager.sendCommand('SET_PIN', { pin });
+      } catch (e) {
+        setNotice({ text: 'Không đổi được PIN trên máy', ok: false });
+        return;
+      }
+    }
+    setDevicePin(pin);
+  };
+
+  // Đã nối máy thật qua Bluetooth -> gửi lệnh qua BLE (máy trả state mới qua notify).
+  // Chưa nối -> gửi cho server mô phỏng.
+  const sendAction = async (action: string, payload: any = {}) => {
     if (bleConnected && bleManager.isConnected()) {
       try {
         await bleManager.sendCommand(action, payload);
-      } catch (e) {
-        console.warn('BLE send failed, falling back to server', e);
+      } catch (e: any) {
+        setNotice({ text: e?.message || 'Gửi lệnh Bluetooth thất bại', ok: false });
       }
+      return;
+    }
+
+    if (simRef.current !== true) {
+      setNotice({ text: 'Chưa kết nối máy - bấm "Quét Bluetooth Gần Máy" trước', ok: false });
+      setIsConnectModalOpen(true);
+      return;
     }
 
     try {
-      const res = await fetch('/api/action', {
+      const res = await fetch('api/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, payload }),
@@ -297,6 +273,11 @@ export default function App() {
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
                     {bleConnected ? 'Bluetooth BLE' : 'ESP32 • Thủy Sinh'}
                   </span>
+                  {bleConnected && state.firmwareVersion && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                      FW {state.firmwareVersion}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400">
                   Điều Khiển Lọc Nước UF Bể Tép &amp; Thủy Sinh Qua Bluetooth / Web
@@ -322,40 +303,6 @@ export default function App() {
 
           {/* Right: Bluetooth BLE Scan Button & Metrics */}
           <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
-            {/* Real Hardware vs Simulation Mode Selector */}
-            <div className="flex items-center rounded-xl p-1 bg-slate-950 border border-slate-800 text-xs font-bold">
-              <button
-                onClick={() => setIsRealHardware(false)}
-                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
-                  !isRealHardware
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Chạy mô phỏng trên trình duyệt để thử nghiệm"
-              >
-                <span>🟡 Giả Lập</span>
-              </button>
-              <button
-                onClick={() => {
-                  setIsRealHardware(true);
-                  if (!bleConnected) setIsConnectModalOpen(true);
-                }}
-                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
-                  isRealHardware
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Đọc dữ liệu và điều khiển thiết bị ESP32 thật"
-              >
-                <div
-                  className={`w-2 h-2 rounded-full ${
-                    bleConnected ? 'bg-emerald-400 animate-ping' : 'bg-emerald-400'
-                  }`}
-                />
-                <span>🟢 Thiết Bị Thật</span>
-              </button>
-            </div>
-
             {/* Bluetooth BLE Scan Button */}
             <button
               onClick={() => setIsConnectModalOpen(true)}
@@ -431,30 +378,28 @@ export default function App() {
         onBleConnectSuccess={(name) => {
           setBleConnected(true);
           setBleDeviceName(name);
-          setIsRealHardware(true);
         }}
         onBleDisconnect={() => {
           setBleConnected(false);
           setBleDeviceName('');
         }}
-        onDeviceStateUpdate={(telemetry) => {
-          setIsRealHardware(true);
-          setState((prev) => ({
-            ...prev,
-            ...telemetry,
-            activeErrors: {
-              ...prev.activeErrors,
-              ...(telemetry.activeErrors || {}),
-            },
-          }));
-        }}
         devicePin={devicePin}
-        onSetDevicePin={setDevicePin}
+        onSetDevicePin={handleSetDevicePin}
         wifiSsid={state.wifiSsid}
         onSaveWifi={(ssid, password) => sendAction('SET_WIFI_CONFIG', { ssid, password })}
       />
 
       {/* Network Alert if server connection lost */}
+      {hasSimulator === false && !bleConnected && (
+        <div className="bg-cyan-500/15 border-b border-cyan-500/40 text-cyan-200 text-xs px-4 py-2 flex items-center justify-center gap-2 text-center">
+          <Bluetooth className="w-4 h-4 shrink-0" />
+          <span>
+            Chưa kết nối máy. Bấm <strong>🔍 Quét Bluetooth Gần Máy</strong> (Chrome / Edge trên máy tính hoặc Android) - số liệu
+            bên dưới chỉ là mẫu.
+          </span>
+        </div>
+      )}
+
       {networkError && !bleConnected && (
         <div className="bg-amber-500/20 border-b border-amber-500/40 text-amber-300 text-xs px-4 py-2 flex items-center justify-center gap-2">
           <AlertTriangle className="w-4 h-4 animate-bounce" />
@@ -492,17 +437,15 @@ export default function App() {
           </nav>
 
           <div className="hidden md:flex items-center gap-3 text-xs text-slate-400 font-mono">
-            {isRealHardware ? (
+            {bleConnected ? (
               <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>
-                  THIẾT BỊ THẬT ({bleConnected ? `BLE: ${bleDeviceName || 'Live'}` : `ESP32 IP: ${state.deviceIp}`})
-                </span>
+                <span>KẾT NỐI BLE TRỰC TIẾP (BẢO MẬT RIÊNG TƯ)</span>
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+              <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>CHẾ ĐỘ GIẢ LẬP (MÔ PHỎNG ẢO)</span>
+                <span>KẾT NỐI MÁY RIÊNG (LOCAL)</span>
               </span>
             )}
             <span>•</span>
@@ -526,6 +469,19 @@ export default function App() {
           <CitoWebDashboard state={state} onAction={sendAction} />
         )}
       </main>
+
+      {/* Kết quả lệnh Bluetooth */}
+      {notice && (
+        <div
+          className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-[90vw] px-4 py-2.5 rounded-xl border text-xs font-bold shadow-2xl ${
+            notice.ok
+              ? 'bg-emerald-950/95 border-emerald-500/60 text-emerald-300'
+              : 'bg-red-950/95 border-red-500/60 text-red-300'
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
 
       {/* 4. Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 py-4 px-4 text-xs text-slate-500 mt-auto">
