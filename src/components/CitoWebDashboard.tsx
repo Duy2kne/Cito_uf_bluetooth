@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { WifiScanList } from './WifiScanList';
 import {
   Activity,
   AlertOctagon,
@@ -82,12 +83,31 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
   );
 
   // Form cấu hình WiFi
-  const [wifiSsidInput, setWifiSsidInput] = useState<string>(
-    state.wifiConfig?.ssid || state.wifiSsid || 'WiFi-Nha-Toi'
-  );
+  const [wifiSsidInput, setWifiSsidInput] = useState<string>(state.wifiConfig?.ssid || state.wifiSsid || '');
   const [wifiPasswordInput, setWifiPasswordInput] = useState<string>('');
   const [showWifiPassword, setShowWifiPassword] = useState<boolean>(false);
-  const [isScanningWifi, setIsScanningWifi] = useState<boolean>(false);
+  const [wifiSsidTouched, setWifiSsidTouched] = useState<boolean>(false);
+
+  // Máy gửi tên WiFi đang lưu sau khi kết nối Bluetooth -> điền sẵn (nếu người dùng chưa gõ)
+  useEffect(() => {
+    if (!wifiSsidTouched && state.wifiSsid) setWifiSsidInput(state.wifiSsid);
+  }, [state.wifiSsid, wifiSsidTouched]);
+
+  const pickWifi = (ssid: string) => {
+    setWifiSsidInput(ssid);
+    setWifiSsidTouched(true);
+    setWifiPasswordInput('');
+    setTimeout(() => document.getElementById('wifi-password-input')?.focus(), 50);
+  };
+
+  const WIFI_STA_TEXT = [
+    'Chưa cài WiFi',
+    'Đang kết nối...',
+    'Đã kết nối',
+    'Không thấy mạng (sai tên / quá xa / WiFi 5GHz)',
+    'Sai mật khẩu hoặc router từ chối',
+  ];
+  const staState = state.wifiStaState ?? (state.wifiConnected ? 2 : state.wifiSsid ? 1 : 0);
 
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string>('');
 
@@ -1148,9 +1168,17 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-emerald-300 font-bold font-mono">
-              {state.wifiConnected ? 'Đã Kết Nối' : 'Chưa Kết Nối'}
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                staState === 2 ? 'bg-emerald-400' : staState >= 3 ? 'bg-red-400' : 'bg-amber-400'
+              } animate-pulse`}
+            />
+            <span
+              className={`text-xs font-bold font-mono ${
+                staState === 2 ? 'text-emerald-300' : staState >= 3 ? 'text-red-300' : 'text-amber-300'
+              }`}
+            >
+              {WIFI_STA_TEXT[staState] || 'Chưa Kết Nối'}
             </span>
           </div>
         </div>
@@ -1163,11 +1191,17 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
           </div>
           <div className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-xl">
             <span className="text-slate-400">Địa chỉ IP:</span>
-            <span className="text-emerald-300 font-bold ml-1">{state.deviceIp}</span>
+            <span className="text-emerald-300 font-bold ml-1">{state.wifiConnected ? state.deviceIp : '-'}</span>
           </div>
           <div className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-xl">
             <span className="text-slate-400">Cường độ sóng:</span>
-            <span className="text-amber-300 font-bold ml-1">-58 dBm (Tốt)</span>
+            <span className="text-amber-300 font-bold ml-1">
+              {state.wifiConnected && state.wifiConfig?.rssi
+                ? `${state.wifiConfig.rssi} dBm (${
+                    state.wifiConfig.rssi >= -60 ? 'Mạnh' : state.wifiConfig.rssi >= -72 ? 'Khá' : 'Yếu'
+                  })`
+                : '-'}
+            </span>
           </div>
         </div>
 
@@ -1176,22 +1210,16 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-white flex items-center gap-2">
               <Radio className="w-4 h-4 text-cyan-400" />
-              Nhập Thông Tin Mạng WiFi Nhà Bạn
+              Chọn Mạng WiFi Nhà Bạn
             </span>
-            <button
-              onClick={() => {
-                setIsScanningWifi(true);
-                setTimeout(() => {
-                  setIsScanningWifi(false);
-                  showSaveSuccess('Đã cập nhật danh sách sóng WiFi xung quanh');
-                }, 1000);
-              }}
-              className="text-xs text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-1 transition-all"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isScanningWifi ? 'animate-spin' : ''}`} />
-              <span>{isScanningWifi ? 'Đang quét...' : '🔍 Quét Mạng Xung Quanh'}</span>
-            </button>
           </div>
+
+          <WifiScanList
+            scan={state.wifiScan}
+            currentSsid={state.wifiSsid}
+            onScan={() => onAction('WIFI_SCAN')}
+            onPick={pickWifi}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             {/* Tên WiFi SSID */}
@@ -1202,24 +1230,13 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
               <input
                 type="text"
                 value={wifiSsidInput}
-                onChange={(e) => setWifiSsidInput(e.target.value)}
-                placeholder="Ví dụ: WiFi-Gia-Dinh hoặc ThuySinh-VIP"
+                onChange={(e) => {
+                  setWifiSsidInput(e.target.value);
+                  setWifiSsidTouched(true);
+                }}
+                placeholder="Chọn từ danh sách quét hoặc gõ tên (mạng ẩn)"
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono focus:border-cyan-400 focus:outline-none transition-all"
               />
-              {/* Gợi ý mạng nhanh */}
-              <div className="flex items-center gap-1.5 mt-2 overflow-x-auto text-[11px]">
-                <span className="text-slate-500">Gợi ý:</span>
-                {['WiFi-Nha-Toi', 'ThuySinh-Tep', 'CITO-Skid-UF'].map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setWifiSsidInput(s)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 text-[10px] font-mono"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Mật khẩu WiFi */}
@@ -1229,6 +1246,7 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
               </label>
               <div className="relative">
                 <input
+                  id="wifi-password-input"
                   type={showWifiPassword ? 'text' : 'password'}
                   value={wifiPasswordInput}
                   onChange={(e) => setWifiPasswordInput(e.target.value)}
@@ -1257,11 +1275,15 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
                   alert('Vui lòng nhập Tên mạng WiFi (SSID)!');
                   return;
                 }
+                if (wifiPasswordInput && (wifiPasswordInput.length < 8 || wifiPasswordInput.length > 63)) {
+                  alert('Mật khẩu WiFi phải từ 8 đến 63 ký tự (để trống nếu mạng không có mật khẩu)');
+                  return;
+                }
                 onAction('SET_WIFI_CONFIG', {
                   ssid: wifiSsidInput.trim(),
                   password: wifiPasswordInput,
                 });
-                showSaveSuccess(`Đã gửi lệnh kết nối mạng WiFi: ${wifiSsidInput.trim()} thành công!`);
+                showSaveSuccess(`Đã gửi WiFi "${wifiSsidInput.trim()}" cho máy - xem trạng thái kết nối ở trên`);
               }}
               className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all"
             >
@@ -1278,10 +1300,11 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
             <span>Cách Cài Đặt WiFi Cho Máy Lần Đầu Khi Mang Về Bể:</span>
           </div>
           <ol className="list-decimal list-inside space-y-1 text-slate-300 leading-relaxed text-[11px]">
-            <li>Cắm nguồn cho máy lọc CITO UF. Máy sẽ tự phát ra một mạng WiFi tạm thời tên là <strong className="text-white">CITO-UF-SYSTEM</strong>.</li>
-            <li>Dùng điện thoại hoặc laptop mở WiFi, chọn kết nối vào mạng <strong className="text-white">CITO-UF-SYSTEM</strong> đó.</li>
-            <li>Mở trình duyệt web, vào ô bên trên và nhập đúng <strong className="text-cyan-300">Tên WiFi</strong> cùng <strong className="text-cyan-300">Mật khẩu WiFi</strong> nhà bạn.</li>
-            <li>Bấm nút <strong className="text-emerald-400">"LƯU VÀ KẾT NỐI WIFI CHO MÁY"</strong>. Máy CITO UF sẽ ghi nhớ vĩnh viễn và tự động kết nối vào mạng Internet nhà bạn.</li>
+            <li>Cắm nguồn máy, đứng gần máy và bấm <strong className="text-white">🔍 Quét Bluetooth Gần Máy</strong> trên web này (Chrome / Edge).</li>
+            <li>Bấm <strong className="text-cyan-300">🔍 Quét mạng WiFi quanh máy</strong> rồi chọn WiFi nhà bạn trong danh sách (chỉ WiFi 2.4GHz).</li>
+            <li>Nhập <strong className="text-cyan-300">Mật khẩu WiFi</strong> rồi bấm <strong className="text-emerald-400">"LƯU VÀ KẾT NỐI WIFI CHO MÁY"</strong>.</li>
+            <li>Xem trạng thái ở góc trên: <strong className="text-emerald-400">Đã kết nối</strong> kèm địa chỉ IP là xong; báo sai mật khẩu thì nhập lại.</li>
+            <li>Không dùng được Bluetooth: nối điện thoại vào WiFi <strong className="text-white">CITO UF SYSTEM</strong> (mật khẩu citocito), mở <strong className="text-white">192.168.4.1</strong> → tab WiFi.</li>
           </ol>
         </div>
       </div>
