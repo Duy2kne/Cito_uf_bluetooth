@@ -7,6 +7,7 @@
  *      {"t":"st",...}  trạng thái real-time (1 giây / lần)
  *      {"t":"cf",...}  cài đặt (khi kết nối, sau mỗi lệnh, khi đổi trên máy)
  *      {"t":"ack","a":"<lệnh>","ok":true,"msg":"..."}  kết quả lệnh
+ *      {"t":"wl","n":[["Tên WiFi",-55,1],...]}           kết quả lệnh WIFI_SCAN (ssid, dBm, có khóa)
  *  - COMMAND (write): {"a":"<LỆNH>","p":{...}}. Gửi AUTH (mã PIN) trước mọi lệnh khác.
  */
 
@@ -89,6 +90,7 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     if (pkt.time) s.rtcTime = pkt.time;
     s.rtcConnected = !!pkt.rtc;
     s.wifiConnected = !!pkt.wifi;
+    if (typeof pkt.sta === 'number') s.wifiStaState = pkt.sta;
     s.deviceIp = pkt.ip || '';
     s.wifiConfig = {
       ...s.wifiConfig,
@@ -157,6 +159,19 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     s.deviceMac = pkt.id;
     s.otaStatus = pkt.otas;
     s.otaLatest = pkt.otal;
+    return s;
+  }
+
+  if (pkt.t === 'wl') {
+    s.wifiScan = {
+      at: Date.now(),
+      networks: (Array.isArray(pkt.n) ? pkt.n : []).map((n: any[]) => ({
+        ssid: String(n[0]),
+        rssi: Number(n[1]),
+        secure: !!n[2],
+      })),
+      error: pkt.err,
+    };
     return s;
   }
 
