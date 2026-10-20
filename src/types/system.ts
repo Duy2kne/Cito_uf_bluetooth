@@ -152,6 +152,13 @@ export interface CitoSystemState {
   // Màn hình 7-đoạn 3 số thực tế của máy
   display7Segment: string;    // Chuỗi 3 ký tự hiện tại: "156", "26C", "Err", "111", "222", "FLt", "Prt", "drn", "XAP", "---", "rES"
   displayHoldingState: string;// "-", "--", "---" khi đang giữ nút
+
+  // Chỉ có khi kết nối máy thật qua Bluetooth (gói 'cf' / 'st' của firmware)
+  firmwareVersion?: string;   // FW_VERSION trong config.h
+  deviceMac?: string;         // MAC 12 ký tự - dùng để ghim máy (pins.json) trên web OTA
+  otaStatus?: string;         // Kết quả kiểm tra OTA online gần nhất
+  otaLatest?: string;         // Phiên bản mới nhất thấy trên server
+  otaProgress?: number;       // % đang nạp OTA, -1 = không nạp
 }
 
 export interface CitoDevice {
