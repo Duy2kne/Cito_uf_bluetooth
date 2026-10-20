@@ -32,6 +32,7 @@ import {
   CitoSystemState,
   FilterDaysType,
   FilterMode,
+  formatTemperature,
   getTdsModeLabel,
   PumpType,
   TDS_MODE_LABELS,
@@ -188,10 +189,28 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
               <Thermometer className="w-3.5 h-3.5 text-blue-400" />
             </div>
             <div className="my-1">
-              <span className="text-3xl font-black font-mono text-blue-400">{state.temperature}</span>
-              <span className="text-xs text-slate-400 ml-1">°C</span>
+              {state.temperatureState === 'ERROR' || state.temperatureState === 'WAITING' ? (
+                <span
+                  className={`text-lg font-black ${
+                    state.temperatureState === 'ERROR' ? 'text-red-400' : 'text-amber-300'
+                  }`}
+                >
+                  {formatTemperature(state)}
+                </span>
+              ) : (
+                <>
+                  <span className="text-3xl font-black font-mono text-blue-400">{state.temperature}</span>
+                  <span className="text-xs text-slate-400 ml-1">°C</span>
+                </>
+              )}
             </div>
-            <div className="text-[10px] text-slate-500">Cảm biến DS18B20</div>
+            <div className={`text-[10px] ${state.temperatureState === 'ERROR' ? 'text-red-400/80' : 'text-slate-500'}`}>
+              {state.temperatureState === 'ERROR'
+                ? 'DS18B20 không đọc được - kiểm tra dây GPIO25 + trở 4.7k'
+                : state.temperatureState === 'WAITING'
+                  ? 'Chế độ 1 tiếng/lần - chưa đo lần nào'
+                  : 'Cảm biến DS18B20'}
+            </div>
           </div>
 
           {/* Lọc */}
