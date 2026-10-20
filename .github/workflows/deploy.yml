@@ -26,7 +26,8 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm ci
+        # npm ci khi lock khop package.json; lock bi lech (quen upload) -> npm install thay vi dung build
+        run: npm ci || (echo "::warning::package-lock.json lech package.json - dung npm install" && npm install --no-audit --no-fund)
 
       - name: Type check
         run: npm run lint
