@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Đường dẫn tương đối: chạy được ở https://<user>.github.io/<repo>/ với bất kỳ tên repo nào
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
