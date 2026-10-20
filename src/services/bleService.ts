@@ -69,7 +69,13 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
   if (pkt.t === 'st') {
     const err: number = pkt.err ?? 0;
     s.tds = pkt.tds ?? s.tds;
-    if (typeof pkt.tmp === 'number') s.temperature = pkt.tmp;
+    // tmp = null: máy không có số hợp lệ -> KHÔNG giữ số cũ, báo lỗi / chờ đo
+    if (typeof pkt.tmp === 'number' && pkt.tok !== false) {
+      s.temperature = pkt.tmp;
+      s.temperatureState = 'OK';
+    } else {
+      s.temperatureState = pkt.tok === false ? 'ERROR' : pkt.tw ? 'WAITING' : 'ERROR';
+    }
     s.isFiltering = !!pkt.flt;
     s.isFlushing = !!pkt.drn;
     s.isPressureRelease = !!pkt.prl;
