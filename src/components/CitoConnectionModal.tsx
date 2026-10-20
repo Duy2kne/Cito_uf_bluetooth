@@ -19,6 +19,8 @@ import {
   X,
 } from 'lucide-react';
 import { bleManager } from '../services/bleService';
+import { WifiScanResult } from '../types/system';
+import { WifiScanList } from './WifiScanList';
 
 interface CitoConnectionModalProps {
   isOpen: boolean;
@@ -31,6 +33,8 @@ interface CitoConnectionModalProps {
   onBleDisconnect: () => void;
   devicePin: string;
   onSetDevicePin: (pin: string) => void;
+  wifiScan?: WifiScanResult;
+  onScanWifi?: () => void;
   wifiSsid?: string;
   onSaveWifi?: (ssid: string, pass: string) => void;
 }
@@ -46,6 +50,8 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
   onBleDisconnect,
   devicePin,
   onSetDevicePin,
+  wifiScan,
+  onScanWifi,
   wifiSsid = '',
   onSaveWifi,
 }) => {
@@ -358,6 +364,18 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
               </div>
 
               <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3">
+                {onScanWifi && (
+                  <WifiScanList
+                    scan={wifiScan}
+                    currentSsid={wifiSsid}
+                    onScan={onScanWifi}
+                    onPick={(ssid) => {
+                      setModalWifiSsid(ssid);
+                      setModalWifiPass('');
+                      setTimeout(() => document.getElementById('modal-wifi-pass')?.focus(), 50);
+                    }}
+                  />
+                )}
                 <div>
                   <label className="text-xs text-slate-300 font-semibold block mb-1">
                     Tên WiFi Nhà Bạn (SSID):
@@ -376,6 +394,7 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
                     Mật Khẩu WiFi (Password):
                   </label>
                   <input
+                    id="modal-wifi-pass"
                     type="password"
                     value={modalWifiPass}
                     onChange={(e) => setModalWifiPass(e.target.value)}
@@ -389,6 +408,10 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
                     onClick={() => {
                       if (!modalWifiSsid.trim()) {
                         alert('Vui lòng nhập tên WiFi!');
+                        return;
+                      }
+                      if (modalWifiPass && (modalWifiPass.length < 8 || modalWifiPass.length > 63)) {
+                        alert('Mật khẩu WiFi phải từ 8 đến 63 ký tự (để trống nếu mạng không có mật khẩu)');
                         return;
                       }
                       if (onSaveWifi) {
