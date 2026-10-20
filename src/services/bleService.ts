@@ -1,7 +1,16 @@
 /**
  * Web Bluetooth API Service for CITO UF SYSTEM
  * Allows direct peer-to-peer secure connection from browser to nearby ESP32 over BLE
+ *
+ * Giao thức (khớp firmware CITO_UF_System/ble_control.cpp):
+ *  - STATUS (notify): mỗi gói JSON kết thúc bằng '\n', firmware cắt theo MTU -> phải ghép lại.
+ *      {"t":"st",...}  trạng thái real-time (1 giây / lần)
+ *      {"t":"cf",...}  cài đặt (khi kết nối, sau mỗi lệnh, khi đổi trên máy)
+ *      {"t":"ack","a":"<lệnh>","ok":true,"msg":"..."}  kết quả lệnh
+ *  - COMMAND (write): {"a":"<LỆNH>","p":{...}}. Gửi AUTH (mã PIN) trước mọi lệnh khác.
  */
+
+import { CitoSystemState, FilterDaysType, TdsMode } from '../types/system';
 
 export const CITO_BLE_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 export const CITO_BLE_CHAR_STATUS_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; // Read/Notify
@@ -14,16 +23,195 @@ export interface BleDeviceInfo {
   rssi?: number;
 }
 
+export interface BleAck {
+  a: string;
+  ok: boolean;
+  msg?: string;
+}
+
+const TDS_MODES: TdsMode[] = ['OFF', 'TEP', 'CA', 'CAY', 'CUSTOM'];
+const FILTER_DAYS: FilterDaysType[] = ['C07', 'C24', 'C13', 'C03', 'Ctu'];
+const TDS_KEYS = ['TEP', 'CA', 'CAY', 'CUSTOM'] as const;
+
+// Bitmask lỗi - khớp ERR_* trong firmware outputs.h
+const ERR = {
+  PUMP: 1 << 0,
+  VALVE_FILTER: 1 << 1,
+  VALVE_DRAIN: 1 << 2,
+  RTC: 1 << 3,
+  OVERCURRENT: 1 << 4,
+  FILTER_DIRTY: 1 << 5,
+  HALL_PUMP_NC: 1 << 6,
+  HALL_VALVE_NC: 1 << 7,
+  VALVE_OVERCURRENT: 1 << 8,
+  DRAIN_NO_FLOW: 1 << 9,
+};
+
+const maskToDays = (m: number): boolean[] => Array.from({ length: 7 }, (_, i) => ((m >> i) & 1) === 1);
+const splitDur = (s: number) => ({ flushMinutes: Math.floor(s / 60), flushSeconds: s % 60 });
+
+function display7(s: CitoSystemState, err: number, oc: boolean): string {
+  const blink = Math.floor(Date.now() / 1000) % 2 === 0;
+  if (s.isPressureRelease) return blink ? 'XAP' : '---';
+  if (s.isPriming) return 'Prt';
+  if (oc) return blink ? 'Err' : err & ERR.VALVE_OVERCURRENT ? '666' : '222';
+  if (err & ERR.PUMP) return blink ? 'Err' : '111';
+  if (err & ERR.VALVE_DRAIN) return blink ? 'Err' : '555';
+  if (err & ERR.FILTER_DIRTY) return blink ? 'FLt' : String(s.tds).padStart(3, ' ');
+  return String(s.tds).padStart(3, ' ');
+}
+
+/** Áp 1 gói telemetry ('st' / 'cf') của firmware lên state hiện tại của web. */
+export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState {
+  const s: CitoSystemState = { ...prev };
+
+  if (pkt.t === 'st') {
+    const err: number = pkt.err ?? 0;
+    s.tds = pkt.tds ?? s.tds;
+    if (typeof pkt.tmp === 'number') s.temperature = pkt.tmp;
+    s.isFiltering = !!pkt.flt;
+    s.isFlushing = !!pkt.drn;
+    s.isPressureRelease = !!pkt.prl;
+    s.isPriming = !!pkt.pri;
+    s.isSleeping = !!pkt.slp;
+    s.isDryRun = false; // Firmware không có chế độ bơm khô
+    s.pumpCurrentMa = pkt.pma ?? 0;
+    s.drainValveCurrentMa = pkt.vma ?? 0;
+    s.tdsMode = TDS_MODES[pkt.md] ?? 'OFF';
+    s.filterMode = pkt.fm ?? s.filterMode;
+    s.isManualFilter = !!pkt.ovr && s.filterMode === 100;
+    s.cooldownSecondsRemaining = pkt.drs < 0 ? -pkt.drs : 0;
+    s.isMeasuringHourlyNow = !!pkt.srun;
+    if (typeof pkt.sage === 'number' && pkt.sage >= 0) {
+      s.lastMeasuredAgoMinutes = Math.floor(pkt.sage / 60);
+      s.nextMeasureInMinutes = Math.max(0, 60 - Math.ceil(pkt.sage / 60));
+    }
+    if (pkt.time) s.rtcTime = pkt.time;
+    s.rtcConnected = !!pkt.rtc;
+    s.wifiConnected = !!pkt.wifi;
+    s.deviceIp = pkt.ip || '';
+    s.wifiConfig = {
+      ...s.wifiConfig,
+      ipAddress: pkt.ip || '',
+      rssi: pkt.rssi ?? 0,
+      status: pkt.wifi ? 'CONNECTED' : s.wifiSsid ? 'CONNECTING' : 'DISCONNECTED',
+    };
+    s.activeErrors = {
+      err111_pumpNoCurrent: !!(err & ERR.PUMP),
+      err222_pumpOverCurrent: !!(err & ERR.OVERCURRENT),
+      err333_filterValveBlocked: !!(err & ERR.VALVE_FILTER),
+      err444_drainNoFlow: !!(err & ERR.DRAIN_NO_FLOW),
+      err555_drainNoCurrent: !!(err & ERR.VALVE_DRAIN),
+      err666_drainOverCurrent: !!(err & ERR.VALVE_OVERCURRENT),
+      flt_dirtyFilter: !!(err & ERR.FILTER_DIRTY),
+      rtcLost: !!(err & ERR.RTC),
+      acsPumpDisconnected: !!(err & ERR.HALL_PUMP_NC),
+      acsDrainDisconnected: !!(err & ERR.HALL_VALVE_NC),
+    };
+    s.otaProgress = pkt.otap ?? -1;
+    s.display7Segment = display7(s, err, !!pkt.oc);
+    s.displayHoldingState = '';
+    return s;
+  }
+
+  if (pkt.t === 'cf') {
+    if (Array.isArray(pkt.ts)) {
+      const ts = { ...s.tdsSettings };
+      TDS_KEYS.forEach((k, i) => {
+        const v = pkt.ts[i];
+        if (Array.isArray(v)) ts[k] = { lo: v[0], hi: v[1], ...splitDur(v[2]) };
+      });
+      s.tdsSettings = ts;
+    }
+    s.filterMinutesPerHour = pkt.fmin ?? s.filterMinutesPerHour;
+    s.filterDays = FILTER_DAYS[pkt.fday] ?? s.filterDays;
+    if (typeof pkt.fwd === 'number') s.filterWeekdays = maskToDays(pkt.fwd);
+    s.pumpType = pkt.pt === 1 ? 'LARGE' : 'SMALL';
+    if (Array.isArray(pkt.pl)) {
+      const lim = (v: number[]) => ({ minCurrentMa: v[0], dirtyFilterMa: v[1], overCurrentMa: v[2] });
+      s.pumpThresholdsSmall = lim(pkt.pl[0]);
+      s.pumpThresholdsLarge = lim(pkt.pl[1]);
+    }
+    s.valveThresholds = { minCurrentMa: pkt.vmin ?? 0, overCurrentMa: pkt.vmax ?? 0 };
+    s.scheduledFlush = {
+      type: pkt.ddm === 1 ? 'Ctu' : 'nd',
+      intervalDays: pkt.ddn,
+      timesPerDay: pkt.ddx,
+      startHour: pkt.ddh,
+      startMinute: pkt.ddi,
+      ...splitDur(pkt.dds ?? 60),
+      customWeekdays: maskToDays(pkt.ddw ?? 0x7f),
+    };
+    s.tdsDisplayMode = pkt.srt ? 'REALTIME' : 'HOURLY';
+    s.autoHourlyTest = !!pkt.sau;
+    s.nightMode = !!pkt.nm;
+    s.screenWhenSleeping = !!pkt.ls;
+    s.buttonHoldSeconds = (pkt.hold ?? 1000) / 1000;
+    s.logoEffect = pkt.lfx ?? -1;
+    s.logoSpeed = pkt.lsp ?? s.logoSpeed;
+    if (typeof pkt.kc === 'number') s.tdsCalibration = { ...s.tdsCalibration, kFactor: pkt.kc };
+    s.wifiSsid = pkt.ssid ?? '';
+    s.wifiConfig = { ...s.wifiConfig, ssid: pkt.ssid ?? '' };
+    s.lastNtpSync = pkt.ntp ?? s.lastNtpSync;
+    s.firmwareVersion = pkt.fw;
+    s.deviceMac = pkt.id;
+    s.otaStatus = pkt.otas;
+    s.otaLatest = pkt.otal;
+    return s;
+  }
+
+  return prev;
+}
+
 export class CitoBleManager {
   private device: any = null;
   private gattServer: any = null;
   private statusChar: any = null;
   private commandChar: any = null;
+  private rxBuffer = '';
+  private pin = '1234';
+  private writeChain: Promise<void> = Promise.resolve();
   private onStateCallback: ((data: any) => void) | null = null;
   private onDisconnectCallback: (() => void) | null = null;
+  private packetListener: ((pkt: any) => void) | null = null;
+  private ackListener: ((ack: BleAck) => void) | null = null;
 
   public isSupported(): boolean {
     return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+  }
+
+  /** Mã PIN gửi cho máy ngay sau khi kết nối (lệnh AUTH). */
+  public setPin(pin: string): void {
+    this.pin = pin;
+  }
+
+  /** App đăng ký 1 lần: nhận mọi gói 'st' / 'cf' và kết quả lệnh. */
+  public setListeners(onPacket: (pkt: any) => void, onAck: (ack: BleAck) => void): void {
+    this.packetListener = onPacket;
+    this.ackListener = onAck;
+  }
+
+  private handleChunk(text: string): void {
+    this.rxBuffer += text;
+    let nl: number;
+    while ((nl = this.rxBuffer.indexOf('\n')) >= 0) {
+      const line = this.rxBuffer.slice(0, nl);
+      this.rxBuffer = this.rxBuffer.slice(nl + 1);
+      if (!line.trim()) continue;
+      try {
+        const pkt = JSON.parse(line);
+        if (pkt.t === 'ack') {
+          if (this.ackListener) this.ackListener(pkt as BleAck);
+        } else {
+          if (this.packetListener) this.packetListener(pkt);
+          if (this.onStateCallback) this.onStateCallback(pkt);
+        }
+      } catch (e) {
+        console.warn('Failed to parse BLE telemetry packet', e, line);
+      }
+    }
+    // Mất 1 mảnh giữa chừng -> bộ đệm không bao giờ gặp '\n': bỏ để tự đồng bộ lại
+    if (this.rxBuffer.length > 8192) this.rxBuffer = '';
   }
 
   public async scanAndConnect(
@@ -43,7 +231,7 @@ export class CitoBleManager {
       // Prompt user to select nearby CITO UF device
       const nav = navigator as any;
       const device = await nav.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'CITO-UF' }, { namePrefix: 'CITO' }],
+        filters: [{ namePrefix: 'CITO-UF' }, { services: [CITO_BLE_SERVICE_UUID] }],
         optionalServices: [CITO_BLE_SERVICE_UUID],
       });
 
@@ -52,6 +240,7 @@ export class CitoBleManager {
         this.gattServer = null;
         this.statusChar = null;
         this.commandChar = null;
+        this.rxBuffer = '';
         if (this.onDisconnectCallback) this.onDisconnectCallback();
       });
 
@@ -65,18 +254,16 @@ export class CitoBleManager {
       this.commandChar = await service.getCharacteristic(CITO_BLE_CHAR_COMMAND_UUID);
 
       // Start notifications for live telemetry from ESP32
-      await this.statusChar.startNotifications();
+      const decoder = new TextDecoder('utf-8');
+      this.rxBuffer = '';
       this.statusChar.addEventListener('characteristicvaluechanged', (event: any) => {
-        try {
-          const value = event.target.value;
-          const decoder = new TextDecoder('utf-8');
-          const jsonStr = decoder.decode(value);
-          const parsed = JSON.parse(jsonStr);
-          if (this.onStateCallback) this.onStateCallback(parsed);
-        } catch (e) {
-          console.warn('Failed to parse BLE telemetry packet', e);
-        }
+        // stream: true -> ký tự UTF-8 (tiếng Việt) bị cắt đôi giữa 2 gói vẫn ghép đúng
+        this.handleChunk(decoder.decode(event.target.value, { stream: true }));
       });
+      await this.statusChar.startNotifications();
+
+      // Xác thực bằng mã PIN rồi xin gói cài đặt đầy đủ
+      await this.sendCommand('AUTH', { pin: this.pin });
 
       return {
         id: device.id,
@@ -97,9 +284,12 @@ export class CitoBleManager {
     }
 
     const commandObj = { a: action, p: payload };
-    const encoder = new TextEncoder();
-    const data = encoder.encode(JSON.stringify(commandObj));
-    await this.commandChar.writeValue(data);
+    const data = new TextEncoder().encode(JSON.stringify(commandObj));
+    if (data.length > 511) throw new Error('Lệnh quá dài (> 511 byte)');
+    // GATT chỉ cho 1 thao tác ghi tại 1 thời điểm -> xếp hàng các lệnh liên tiếp
+    const run = this.writeChain.then(() => this.commandChar.writeValue(data));
+    this.writeChain = run.catch(() => undefined);
+    await run;
   }
 
   public disconnect(): void {
@@ -110,21 +300,7 @@ export class CitoBleManager {
     this.gattServer = null;
     this.statusChar = null;
     this.commandChar = null;
-  }
-
-  public async readStatus(): Promise<any> {
-    if (!this.statusChar || !this.gattServer || !this.gattServer.connected) {
-      return null;
-    }
-    try {
-      const value = await this.statusChar.readValue();
-      const decoder = new TextDecoder('utf-8');
-      const jsonStr = decoder.decode(value);
-      return JSON.parse(jsonStr);
-    } catch (e) {
-      console.warn('Failed to read status over BLE:', e);
-      return null;
-    }
+    this.rxBuffer = '';
   }
 
   public isConnected(): boolean {
