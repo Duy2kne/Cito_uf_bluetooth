@@ -61,6 +61,16 @@ export interface ScheduledFlush {
   customWeekdays: boolean[]; // [CN, T2, T3, T4, T5, T6, T7]
 }
 
+// OK = số đo hợp lệ; WAITING = chế độ 1 tiếng/lần chưa đo lần nào; ERROR = DS18B20 lỗi / chưa cắm
+export type TemperatureState = 'OK' | 'WAITING' | 'ERROR';
+
+/** Chuỗi hiển thị nhiệt độ (không kèm °C khi lỗi / chờ đo). */
+export function formatTemperature(s: { temperature: number; temperatureState?: TemperatureState }): string {
+  if (s.temperatureState === 'ERROR') return 'Lỗi cảm biến';
+  if (s.temperatureState === 'WAITING') return 'Chờ đo';
+  return `${s.temperature}°C`;
+}
+
 export interface WifiNetwork {
   ssid: string;
   rssi: number;     // dBm
@@ -171,6 +181,7 @@ export interface CitoSystemState {
   otaStatus?: string;         // Kết quả kiểm tra OTA online gần nhất
   otaLatest?: string;         // Phiên bản mới nhất thấy trên server
   otaProgress?: number;       // % đang nạp OTA, -1 = không nạp
+  temperatureState?: TemperatureState; // Chỉ có khi nối máy thật; không có = số mẫu / mô phỏng
   wifiStaState?: number;      // 0 chưa cài, 1 đang kết nối, 2 đã kết nối, 3 không thấy mạng, 4 sai mật khẩu
   wifiScan?: WifiScanResult;  // Kết quả lệnh WIFI_SCAN gần nhất
 }
