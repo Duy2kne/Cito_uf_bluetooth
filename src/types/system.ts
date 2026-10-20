@@ -61,6 +61,18 @@ export interface ScheduledFlush {
   customWeekdays: boolean[]; // [CN, T2, T3, T4, T5, T6, T7]
 }
 
+export interface WifiNetwork {
+  ssid: string;
+  rssi: number;     // dBm
+  secure: boolean;  // Có mật khẩu
+}
+
+export interface WifiScanResult {
+  at: number;             // Date.now() lúc nhận kết quả
+  networks: WifiNetwork[];
+  error?: string;
+}
+
 export interface CitoSystemState {
   // Trạng thái vận hành
   isFiltering: boolean;       // Đang lọc
@@ -159,6 +171,8 @@ export interface CitoSystemState {
   otaStatus?: string;         // Kết quả kiểm tra OTA online gần nhất
   otaLatest?: string;         // Phiên bản mới nhất thấy trên server
   otaProgress?: number;       // % đang nạp OTA, -1 = không nạp
+  wifiStaState?: number;      // 0 chưa cài, 1 đang kết nối, 2 đã kết nối, 3 không thấy mạng, 4 sai mật khẩu
+  wifiScan?: WifiScanResult;  // Kết quả lệnh WIFI_SCAN gần nhất
 }
 
 export interface CitoDevice {
