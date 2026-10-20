@@ -33,7 +33,6 @@ interface CitoConnectionModalProps {
   onSetDevicePin: (pin: string) => void;
   wifiSsid?: string;
   onSaveWifi?: (ssid: string, pass: string) => void;
-  onDeviceStateUpdate?: (data: any) => void;
 }
 
 export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
@@ -49,13 +48,13 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
   onSetDevicePin,
   wifiSsid = '',
   onSaveWifi,
-  onDeviceStateUpdate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'connect' | 'wifi' | 'security'>('connect');
+  const [activeTab, setActiveTab] = useState<'connect' | 'wifi' | 'security' | 'firmware'>('connect');
   const [isScanning, setIsScanning] = useState(false);
   const [bleError, setBleError] = useState<string>('');
   const [pinInput, setPinInput] = useState(devicePin);
   const [pinSuccess, setPinSuccess] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [modalWifiSsid, setModalWifiSsid] = useState(wifiSsid || '');
   const [modalWifiPass, setModalWifiPass] = useState('');
   const [modalWifiSaved, setModalWifiSaved] = useState(false);
@@ -70,8 +69,8 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
     try {
       if (isBleSupported) {
         const info = await bleManager.scanAndConnect(
-          (telemetry) => {
-            if (onDeviceStateUpdate) onDeviceStateUpdate(telemetry);
+          () => {
+            /* State được App cập nhật qua bleManager.setListeners */
           },
           () => {
             onBleDisconnect();
@@ -103,6 +102,31 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
     setPinSuccess(true);
     setTimeout(() => setPinSuccess(false), 2000);
   };
+
+  const esp32BleFirmwareCode = `/*
+ * CITO UF SYSTEM - Bluetooth LE (firmware thật: CITO_UF_System/ble_control.cpp)
+ * Thư viện: NimBLE-Arduino 2.x + ArduinoJson 7.x
+ *
+ * Service : 4fafc201-1fb5-459e-8fcc-c5c9c331914b
+ * STATUS  : beb5483e-36e1-4688-b7f5-ea07361b26a8  (notify, máy -> web)
+ * COMMAND : cba1d466-344c-4be3-ab3f-189f80dd7518  (write,  web -> máy)
+ *
+ * Máy -> web: mỗi gói JSON kết thúc bằng '\n', cắt theo MTU (web ghép lại)
+ *   {"t":"st","tds":146,"tmp":26.5,"flt":true,"drn":false,"err":0,...}  1 giây / lần
+ *   {"t":"cf","ts":[[lo,hi,giây_xả],...],"fmin":30,"fw":"2.0.0",...}    cài đặt
+ *   {"t":"ack","a":"TOGGLE_FILTER","ok":true,"msg":"..."}               kết quả lệnh
+ *
+ * Web -> máy: {"a":"<LỆNH>","p":{...}}
+ *   AUTH {pin}  (bắt buộc trước mọi lệnh, sai 5 lần -> ngắt kết nối)
+ *   TOGGLE_FILTER, TOGGLE_FLUSH, SET_TDS_MODE {mode}, SET_TDS_CONFIG,
+ *   SET_FILTER_MODE, SET_PUMP_CONFIG, SET_SCHEDULED_FLUSH, SET_TDS_DISPLAY_MODE,
+ *   TRIGGER_MEASURE_NOW, RELEASE_PRESSURE, STOP_PRESSURE_RELEASE, RESET_OK,
+ *   RESET_ALL, TOGGLE_NIGHT_MODE, TOGGLE_SCREEN_SLEEP, SET_BUTTON_HOLD_TIME,
+ *   SYNC_NTP, SET_RTC, SET_WIFI_CONFIG, CLEAR_WIFI, CALIBRATE_TDS,
+ *   RESET_TDS_CALIBRATION, TOUCH_KEY {key}, SET_LOGO {effect,speedMs},
+ *   OTA_CHECK {force}, SET_PIN {pin}, RESTART, GET_CONFIG
+ */
+`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
@@ -167,6 +191,18 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
           >
             <ShieldCheck className="w-4 h-4" />
             <span>3. Mã PIN Bảo Mật</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('firmware')}
+            className={`py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'firmware'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Code className="w-4 h-4" />
+            <span>4. Mã Nguồn ESP32</span>
           </button>
         </div>
 
@@ -429,6 +465,33 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
                     </div>
                   )}
                 </form>
+              </div>
+            </div>
+          )}
+
+          {/* ================= TAB 3: ESP32 BLE CODE ================= */}
+          {activeTab === 'firmware' && (
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-mono">
+                  Mã nguồn C++ Arduino BLE Server nạp vào ESP32
+                </span>
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(esp32BleFirmwareCode);
+                    setCopiedCode(true);
+                    setTimeout(() => setCopiedCode(false), 2000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center gap-1.5"
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedCode ? 'Đã sao chép!' : 'Sao Chép Mã'}</span>
+                </button>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-[11px] text-cyan-200/90 overflow-x-auto max-h-[350px] leading-relaxed">
+                <pre>{esp32BleFirmwareCode}</pre>
               </div>
             </div>
           )}
