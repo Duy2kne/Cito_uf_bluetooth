@@ -387,6 +387,8 @@ export default function App() {
         onSetDevicePin={handleSetDevicePin}
         wifiSsid={state.wifiSsid}
         onSaveWifi={(ssid, password) => sendAction('SET_WIFI_CONFIG', { ssid, password })}
+        wifiScan={state.wifiScan}
+        onScanWifi={() => sendAction('WIFI_SCAN')}
       />
 
       {/* Network Alert if server connection lost */}
