@@ -11,7 +11,7 @@ import {
   Volume2,
   Zap,
 } from 'lucide-react';
-import { CitoSystemState, TdsMode } from '../types/system';
+import { CitoSystemState, TdsMode, formatTemperature } from '../types/system';
 
 interface CitoPhysicalPanelProps {
   state: CitoSystemState;
@@ -319,7 +319,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           <div className="text-[11px] text-slate-400 font-mono mt-2 flex items-center gap-3">
             <span>TDS: {state.tds} ppm</span>
             <span>•</span>
-            <span>Nhiệt độ: {state.temperature}°C</span>
+            <span>Nhiệt độ: {formatTemperature(state)}</span>
           </div>
         </div>
 
