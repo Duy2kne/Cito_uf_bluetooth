@@ -17,6 +17,49 @@ import { CitoSystemState, FilterDaysType, TdsMode } from '../types/system';
 import { parseHistory } from './history';
 
 const HISTORY_MAX = 64;
+const LAST_DEVICE_KEY = 'cito_ble_last_device'; // {id, name} máy đã nối gần nhất (localStorage)
+
+function saveLastDevice(id: string, name: string): void {
+  try {
+    localStorage.setItem(LAST_DEVICE_KEY, JSON.stringify({ id, name }));
+  } catch {
+    /* private mode: không nhớ được, lần sau phải quét lại */
+  }
+}
+
+/** Máy đã nối gần nhất (để hiện nút "Kết nối lại"), null nếu chưa nối lần nào. */
+export function getLastDevice(): { id: string; name: string } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_DEVICE_KEY) || 'null');
+    return v && v.id ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Chờ máy phát quảng bá (đã trong tầm sóng) - cần Chrome hỗ trợ watchAdvertisements. */
+function waitForAdvertisement(device: any, ms: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      ac.abort();
+      reject(new Error('Máy chưa trong tầm Bluetooth'));
+    }, ms);
+    device.addEventListener(
+      'advertisementreceived',
+      () => {
+        clearTimeout(timer);
+        ac.abort();
+        resolve();
+      },
+      { once: true }
+    );
+    device.watchAdvertisements({ signal: ac.signal }).catch((e: any) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+}
 
 export const CITO_BLE_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 export const CITO_BLE_CHAR_STATUS_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; // Read/Notify
@@ -105,8 +148,9 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
       s.lastMeasuredAgoMinutes = Math.floor(pkt.sage / 60);
       s.nextMeasureInMinutes = Math.max(0, 60 - Math.ceil(pkt.sage / 60));
     }
-    if (pkt.time) s.rtcTime = pkt.time;
-    s.rtcConnected = !!pkt.rtc;
+    s.rtcTime = pkt.time || 'RTC lỗi';
+    s.rtcConnected = !!pkt.rtc && !!pkt.time;
+    s.rtcBatteryLow = !!pkt.rtcr;
     s.wifiConnected = !!pkt.wifi;
     if (typeof pkt.sta === 'number') s.wifiStaState = pkt.sta;
     s.deviceIp = pkt.ip || '';
@@ -301,6 +345,7 @@ export class CitoBleManager {
       device.removeEventListener('gattserverdisconnected', this.onDropped); // Quét lại cùng máy: không gắn trùng
       device.addEventListener('gattserverdisconnected', this.onDropped);
       await this.attach();
+      saveLastDevice(device.id, device.name || 'CITO UF');
       if (this.linkListener) this.linkListener('connected', device.name || 'CITO UF');
 
       return {
@@ -314,6 +359,49 @@ export class CitoBleManager {
       }
       throw err;
     }
+  }
+
+  /** Trình duyệt cho phép tự nối lại máy đã cấp quyền (không cần bảng chọn thiết bị) không. */
+  public canAutoReconnect(): boolean {
+    const nav = navigator as any;
+    return this.isSupported() && typeof nav.bluetooth.getDevices === 'function';
+  }
+
+  /**
+   * Tải lại trang: nối lại máy đã cấp quyền lần trước, KHÔNG hiện bảng chọn thiết bị.
+   * Cần Chrome/Edge có navigator.bluetooth.getDevices() (xem THAY_DOI_WEB.md).
+   * Trả về null nếu trình duyệt không hỗ trợ hoặc chưa từng nối máy nào.
+   */
+  public async reconnectRemembered(
+    onStateUpdate: (data: any) => void,
+    onDisconnected: () => void
+  ): Promise<BleDeviceInfo | null> {
+    if (!this.canAutoReconnect()) return null;
+    const last = getLastDevice();
+    const devices: any[] = await (navigator as any).bluetooth.getDevices();
+    const device =
+      devices.find((d) => last && d.id === last.id) || devices.find((d) => (d.name || '').startsWith('CITO-UF'));
+    if (!device) return null;
+
+    this.onStateCallback = onStateUpdate;
+    this.onDisconnectCallback = onDisconnected;
+    if (this.device) this.device.removeEventListener('gattserverdisconnected', this.onDropped);
+    this.device = device;
+    this.userDisconnect = false;
+    device.removeEventListener('gattserverdisconnected', this.onDropped);
+    device.addEventListener('gattserverdisconnected', this.onDropped);
+
+    try {
+      await this.attach();
+    } catch (e) {
+      // Máy có thể chưa trong tầm / đang khởi động: chờ quảng bá tối đa 15s rồi thử lại
+      if (typeof device.watchAdvertisements !== 'function') throw e;
+      await waitForAdvertisement(device, 15000);
+      await this.attach();
+    }
+    saveLastDevice(device.id, device.name || 'CITO UF');
+    if (this.linkListener) this.linkListener('connected', device.name || 'CITO UF');
+    return { id: device.id, name: device.name || 'CITO UF', connected: true };
   }
 
   /** Kết nối GATT, đăng ký notify, gửi PIN. Dùng cho lần đầu và khi tự kết nối lại. */
