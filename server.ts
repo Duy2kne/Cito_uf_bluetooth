@@ -611,6 +611,19 @@ async function startServer() {
         break;
       }
 
+      case 'WIFI_SCAN': {
+        // Mô phỏng kết quả quét của ESP32 (máy thật trả về qua Bluetooth, gói 'wl')
+        state.wifiScan = {
+          at: Date.now(),
+          networks: [
+            { ssid: state.wifiSsid || 'WiFi-Nha-Toi', rssi: -52, secure: true },
+            { ssid: 'ThuySinh-Tep', rssi: -67, secure: true },
+            { ssid: 'Cafe-Free', rssi: -80, secure: false },
+          ],
+        };
+        break;
+      }
+
       case 'CALIBRATE_TDS': {
         const { standardPpm, kFactor } = payload;
         if (standardPpm) {
