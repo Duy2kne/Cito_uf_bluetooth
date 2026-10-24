@@ -95,21 +95,22 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
     setHoldingBtn(null);
     setHoldStage('');
 
-    // If held for >= 5 seconds on LOC -> Toggle Dry Run (drn)
+    // If held for >= 5 seconds on LOC -> Toggle Dry Run (drn) - chỉ có ở bản mô phỏng, firmware thật không có
     if (key === 'LOC' && holdDuration >= 4800) {
-      onAction('TOGGLE_DRY_RUN');
+      if (!state.firmwareVersion) onAction('TOGGLE_DRY_RUN');
+      return;
+    }
+
+    // Kiểm tra 10s TRƯỚC 5s: trước đây điều kiện 5s chạy trước nên giữ 10s không bao giờ ra Reset
+    // If held for >= 10 seconds on OK -> Reset all (rES)
+    if (key === 'OK' && holdDuration >= 9500) {
+      if (window.confirm('Giữ OK 10 giây = KHÔI PHỤC TOÀN BỘ CÀI ĐẶT GỐC. Tiếp tục?')) onAction('RESET_ALL');
       return;
     }
 
     // If held for >= 5 seconds on OK -> Pressure Release (XAP)
     if (key === 'OK' && holdDuration >= 4800) {
       onAction('RELEASE_PRESSURE');
-      return;
-    }
-
-    // If held for >= 10 seconds on OK -> Reset all (rES)
-    if (key === 'OK' && holdDuration >= 9500) {
-      onAction('RESET_ALL');
       return;
     }
 
@@ -457,12 +458,14 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
         >
           Xả áp suất (Giữ OK 5s)
         </button>
-        <button
-          onClick={() => onAction('TOGGLE_DRY_RUN')}
-          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-all"
-        >
-          Bơm khô drn (Giữ LỌC 5s)
-        </button>
+        {!state.firmwareVersion && (
+          <button
+            onClick={() => onAction('TOGGLE_DRY_RUN')}
+            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-all"
+          >
+            Bơm khô drn (Giữ LỌC 5s - mô phỏng)
+          </button>
+        )}
         <button
           onClick={() => onAction('RESET_OK')}
           className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] transition-all"
