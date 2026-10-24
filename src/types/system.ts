@@ -71,6 +71,11 @@ export function formatTemperature(s: { temperature: number; temperatureState?: T
   return `${s.temperature}°C`;
 }
 
+import type { HistoryEvent } from '../services/history';
+
+// Vì sao máy đang lọc: theo lịch / bật tay (lịch tạm dừng) / tự đo cảm biến / mồi nước khi khởi động
+export type FilterSource = 'AUTO' | 'MANUAL' | 'SENSOR' | 'PRIMING';
+
 export interface WifiNetwork {
   ssid: string;
   rssi: number;     // dBm
@@ -184,6 +189,10 @@ export interface CitoSystemState {
   temperatureState?: TemperatureState; // Chỉ có khi nối máy thật; không có = số mẫu / mô phỏng
   wifiStaState?: number;      // 0 chưa cài, 1 đang kết nối, 2 đã kết nối, 3 không thấy mạng, 4 sai mật khẩu
   wifiScan?: WifiScanResult;  // Kết quả lệnh WIFI_SCAN gần nhất
+  scheduleOverridden?: boolean; // Đã bật/tắt lọc bằng tay -> lịch lọc tự động TẠM DỪNG (RESUME_AUTO để chạy lại)
+  ocHalted?: boolean;           // Đang DỪNG KHẨN CẤP do quá dòng - chờ OK
+  filterSource?: FilterSource;
+  history?: HistoryEvent[];     // Nhật ký gần nhất, MỚI NHẤT trước (tối đa 64)
 }
 
 export interface CitoDevice {
