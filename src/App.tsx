@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Bluetooth,
   BluetoothConnected,
+  Clock,
   Cpu,
   Droplets,
   Radio,
@@ -14,7 +15,7 @@ import {
 import { CitoConnectionModal } from './components/CitoConnectionModal';
 import { CitoPhysicalPanel } from './components/CitoPhysicalPanel';
 import { CitoWebDashboard } from './components/CitoWebDashboard';
-import { applyBlePacket, bleManager } from './services/bleService';
+import { applyBlePacket, bleManager, getLastDevice } from './services/bleService';
 import { CitoSystemState, formatTemperature, getTdsModeLabel } from './types/system';
 
 const INITIAL_CITO_STATE: CitoSystemState = {
@@ -147,7 +148,7 @@ export default function App() {
   const bleConnectedRef = useRef(false);
   bleConnectedRef.current = bleConnected;
 
-  const [activeTab, setActiveTab] = useState<'panel' | 'web'>('panel');
+  const [activeTab, setActiveTab] = useState<'panel' | 'web'>('web');
   const [networkError, setNetworkError] = useState(false);
   // Server mô phỏng (server.ts): null = đang dò, true = có (npm run dev), false = không có
   // (web tĩnh trên GitHub Pages -> chỉ điều khiển máy thật qua Bluetooth)
@@ -207,6 +208,49 @@ export default function App() {
       }
     });
   }, []);
+
+  // Tải lại trang: tự nối lại máy Bluetooth đã cấp quyền (không phải bấm quét lại)
+  const [lastDevice] = useState(() => getLastDevice());
+  useEffect(() => {
+    if (!bleManager.canAutoReconnect() || !getLastDevice()) return;
+    let cancelled = false;
+    setBleLink('reconnecting');
+    bleManager
+      .reconnectRemembered(
+        () => {},
+        () => {
+          setBleConnected(false);
+          setBleDeviceName('');
+        }
+      )
+      .then((info) => {
+        if (!cancelled && !info) setBleLink('idle');
+      })
+      .catch((e) => {
+        console.warn('Auto reconnect failed', e);
+        if (!cancelled) setBleLink('idle');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Trình duyệt không tự nối lại được: 1 chạm mở bảng chọn (đã lọc sẵn máy CITO-UF)
+  const quickReconnect = async () => {
+    try {
+      const info = await bleManager.scanAndConnect(
+        () => {},
+        () => {
+          setBleConnected(false);
+          setBleDeviceName('');
+        }
+      );
+      setBleConnected(true);
+      setBleDeviceName(info.name);
+    } catch (e: any) {
+      setNotice({ text: e?.message || 'Không kết nối được Bluetooth', ok: false });
+    }
+  };
 
   useEffect(() => {
     bleManager.setPin(devicePin);
@@ -388,6 +432,31 @@ export default function App() {
                 </span>
               </div>
 
+              <div
+                className={`bg-slate-950 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
+                  bleConnected && !state.rtcConnected
+                    ? 'border-red-500/50'
+                    : bleConnected && state.rtcBatteryLow
+                      ? 'border-amber-500/50'
+                      : 'border-slate-800'
+                }`}
+                title={
+                  state.rtcBatteryLow
+                    ? 'Giờ DS3231 - pin CR2032 yếu: máy từng mất giờ, hãy đồng bộ lại và thay pin'
+                    : 'Giờ máy (DS3231)'
+                }
+              >
+                <Clock className={`w-3.5 h-3.5 ${bleConnected && !state.rtcConnected ? 'text-red-400' : 'text-indigo-400'}`} />
+                <span
+                  className={`font-bold text-[11px] ${
+                    bleConnected && !state.rtcConnected ? 'text-red-300' : 'text-indigo-200'
+                  }`}
+                >
+                  {bleConnected ? state.rtcTime : '--:--:--'}
+                  {bleConnected && state.rtcBatteryLow ? ' ⚠' : ''}
+                </span>
+              </div>
+
               <div className="hidden md:flex bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-slate-300 text-[11px]">{state.deviceIp}</span>
@@ -425,13 +494,24 @@ export default function App() {
       {bleLink === 'reconnecting' && (
         <div className="bg-amber-500/15 border-b border-amber-500/40 text-amber-200 text-xs px-4 py-2 flex items-center justify-center gap-2 text-center">
           <Bluetooth className="w-4 h-4 shrink-0 animate-pulse" />
-          <span>Mất sóng Bluetooth - đang tự kết nối lại... (số liệu bên dưới là lần cuối nhận được)</span>
+          <span>
+            Đang tự kết nối lại {bleDeviceName || lastDevice?.name || 'máy CITO UF'} qua Bluetooth... (đứng gần máy, bật
+            Bluetooth)
+          </span>
         </div>
       )}
 
       {hasSimulator === false && !bleConnected && bleLink !== 'reconnecting' && (
         <div className="bg-cyan-500/15 border-b border-cyan-500/40 text-cyan-200 text-xs px-4 py-2 flex items-center justify-center gap-2 text-center">
           <Bluetooth className="w-4 h-4 shrink-0" />
+          {lastDevice && (
+            <button
+              onClick={quickReconnect}
+              className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shrink-0"
+            >
+              🔄 Kết nối lại {lastDevice.name}
+            </button>
+          )}
           <span>
             {state.firmwareVersion ? 'Đã ngắt kết nối máy' : 'Chưa kết nối máy'}. Bấm{' '}
             <strong>🔍 Quét Bluetooth Gần Máy</strong> (Chrome / Edge trên máy tính hoặc Android) - số liệu bên dưới{' '}
@@ -452,18 +532,6 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between overflow-x-auto py-2">
           <nav className="flex items-center gap-2">
             <button
-              onClick={() => setActiveTab('panel')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
-                activeTab === 'panel'
-                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>1. Mặt Máy Cảm Ứng (Phần Cứng)</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('web')}
               className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
                 activeTab === 'web'
@@ -472,7 +540,19 @@ export default function App() {
               }`}
             >
               <Activity className="w-3.5 h-3.5" />
-              <span>2. Giao Diện Web Điều Khiển Toàn Diện</span>
+              <span>1. Giao Diện Web Điều Khiển Toàn Diện</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('panel')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
+                activeTab === 'panel'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>2. Mặt Máy Cảm Ứng (Phần Cứng)</span>
             </button>
           </nav>
 
