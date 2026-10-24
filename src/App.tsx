@@ -142,6 +142,8 @@ export default function App() {
     }
   });
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  // Rớt Bluetooth: bleService tự thử nối lại 3 lần
+  const [bleLink, setBleLink] = useState<'idle' | 'connected' | 'reconnecting' | 'lost'>('idle');
   const bleConnectedRef = useRef(false);
   bleConnectedRef.current = bleConnected;
 
@@ -194,6 +196,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    bleManager.setLinkListener((link, name) => {
+      setBleLink(link);
+      if (link === 'connected') {
+        setBleConnected(true);
+        setBleDeviceName(name);
+      } else {
+        setBleConnected(false);
+        if (link === 'lost') setNotice({ text: 'Mất kết nối Bluetooth - bấm Quét Bluetooth để nối lại', ok: false });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     bleManager.setPin(devicePin);
     try {
       localStorage.setItem('cito_ble_pin', devicePin);
@@ -224,6 +239,19 @@ export default function App() {
   // Đã nối máy thật qua Bluetooth -> gửi lệnh qua BLE (máy trả state mới qua notify).
   // Chưa nối -> gửi cho server mô phỏng.
   const sendAction = async (action: string, payload: any = {}) => {
+    if (action === 'SYNC_NTP') {
+      // Kèm giờ điện thoại: máy không có WiFi / NTP lỗi thì lấy giờ này cho RTC
+      const d = new Date();
+      payload = {
+        ...payload,
+        y: d.getFullYear(),
+        mo: d.getMonth() + 1,
+        d: d.getDate(),
+        h: d.getHours(),
+        m: d.getMinutes(),
+        s: d.getSeconds(),
+      };
+    }
     if (bleConnected && bleManager.isConnected()) {
       try {
         await bleManager.sendCommand(action, payload);
@@ -394,12 +422,20 @@ export default function App() {
       />
 
       {/* Network Alert if server connection lost */}
-      {hasSimulator === false && !bleConnected && (
+      {bleLink === 'reconnecting' && (
+        <div className="bg-amber-500/15 border-b border-amber-500/40 text-amber-200 text-xs px-4 py-2 flex items-center justify-center gap-2 text-center">
+          <Bluetooth className="w-4 h-4 shrink-0 animate-pulse" />
+          <span>Mất sóng Bluetooth - đang tự kết nối lại... (số liệu bên dưới là lần cuối nhận được)</span>
+        </div>
+      )}
+
+      {hasSimulator === false && !bleConnected && bleLink !== 'reconnecting' && (
         <div className="bg-cyan-500/15 border-b border-cyan-500/40 text-cyan-200 text-xs px-4 py-2 flex items-center justify-center gap-2 text-center">
           <Bluetooth className="w-4 h-4 shrink-0" />
           <span>
-            Chưa kết nối máy. Bấm <strong>🔍 Quét Bluetooth Gần Máy</strong> (Chrome / Edge trên máy tính hoặc Android) - số liệu
-            bên dưới chỉ là mẫu.
+            {state.firmwareVersion ? 'Đã ngắt kết nối máy' : 'Chưa kết nối máy'}. Bấm{' '}
+            <strong>🔍 Quét Bluetooth Gần Máy</strong> (Chrome / Edge trên máy tính hoặc Android) - số liệu bên dưới{' '}
+            {state.firmwareVersion ? 'là lần cuối nhận được, KHÔNG cập nhật' : 'chỉ là mẫu'}.
           </span>
         </div>
       )}
