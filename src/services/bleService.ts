@@ -8,10 +8,15 @@
  *      {"t":"cf",...}  cài đặt (khi kết nối, sau mỗi lệnh, khi đổi trên máy)
  *      {"t":"ack","a":"<lệnh>","ok":true,"msg":"..."}  kết quả lệnh
  *      {"t":"wl","n":[["Tên WiFi",-55,1],...]}           kết quả lệnh WIFI_SCAN (ssid, dBm, có khóa)
+ *      {"t":"hi","clr":true,"end":false,"e":[[t,type,src,val],...]}  nhật ký (mới nhất trước, nhiều trang)
+ *      {"t":"ev","e":[[...],...]}                        sự kiện mới phát sinh (cũ -> mới)
  *  - COMMAND (write): {"a":"<LỆNH>","p":{...}}. Gửi AUTH (mã PIN) trước mọi lệnh khác.
  */
 
 import { CitoSystemState, FilterDaysType, TdsMode } from '../types/system';
+import { parseHistory } from './history';
+
+const HISTORY_MAX = 64;
 
 export const CITO_BLE_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 export const CITO_BLE_CHAR_STATUS_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; // Read/Notify
@@ -58,7 +63,11 @@ function display7(s: CitoSystemState, err: number, oc: boolean): string {
   if (oc) return blink ? 'Err' : err & ERR.VALVE_OVERCURRENT ? '666' : '222';
   if (err & ERR.PUMP) return blink ? 'Err' : '111';
   if (err & ERR.VALVE_DRAIN) return blink ? 'Err' : '555';
-  if (err & ERR.FILTER_DIRTY) return blink ? 'FLt' : String(s.tds).padStart(3, ' ');
+  if (err & ERR.FILTER_DIRTY) return 'FLt'; // Giống máy: FLt cố định
+  // Giống máy: TDS 30 giây rồi nhiệt độ 30 giây (chỉ khi có nhiệt độ hợp lệ)
+  if (s.temperatureState === 'OK' && Math.floor(Date.now() / 30000) % 2 === 1) {
+    return `${Math.round(s.temperature)}C`.padStart(3, ' ');
+  }
   return String(s.tds).padStart(3, ' ');
 }
 
@@ -86,7 +95,10 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     s.drainValveCurrentMa = pkt.vma ?? 0;
     s.tdsMode = TDS_MODES[pkt.md] ?? 'OFF';
     s.filterMode = pkt.fm ?? s.filterMode;
-    s.isManualFilter = !!pkt.ovr && s.filterMode === 100;
+    s.scheduleOverridden = !!pkt.ovr;
+    s.isManualFilter = !!pkt.ovr && s.isFiltering;
+    s.ocHalted = !!pkt.oc;
+    s.filterSource = pkt.pri ? 'PRIMING' : pkt.srun ? 'SENSOR' : pkt.ovr ? 'MANUAL' : 'AUTO';
     s.cooldownSecondsRemaining = pkt.drs < 0 ? -pkt.drs : 0;
     s.isMeasuringHourlyNow = !!pkt.srun;
     if (typeof pkt.sage === 'number' && pkt.sage >= 0) {
@@ -168,6 +180,18 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     return s;
   }
 
+  if (pkt.t === 'hi') {
+    const page = parseHistory(pkt.e);
+    s.history = (pkt.clr ? page : [...(s.history || []), ...page]).slice(0, HISTORY_MAX);
+    return s;
+  }
+
+  if (pkt.t === 'ev') {
+    const fresh = parseHistory(pkt.e).reverse(); // máy gửi cũ -> mới; danh sách web mới nhất trước
+    s.history = [...fresh, ...(s.history || [])].slice(0, HISTORY_MAX);
+    return s;
+  }
+
   if (pkt.t === 'wl') {
     s.wifiScan = {
       at: Date.now(),
@@ -196,6 +220,16 @@ export class CitoBleManager {
   private onDisconnectCallback: (() => void) | null = null;
   private packetListener: ((pkt: any) => void) | null = null;
   private ackListener: ((ack: BleAck) => void) | null = null;
+  private linkListener: ((state: 'connected' | 'reconnecting' | 'lost', name: string) => void) | null = null;
+  private userDisconnect = false;
+  private onDropped = () => {
+    void this.handleDropped();
+  };
+  private decoder = new TextDecoder('utf-8');
+  private onValue = (event: any) => {
+    // stream: true -> ký tự UTF-8 (tiếng Việt) bị cắt đôi giữa 2 gói vẫn ghép đúng
+    this.handleChunk(this.decoder.decode(event.target.value, { stream: true }));
+  };
 
   public isSupported(): boolean {
     return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
@@ -204,6 +238,11 @@ export class CitoBleManager {
   /** Mã PIN gửi cho máy ngay sau khi kết nối (lệnh AUTH). */
   public setPin(pin: string): void {
     this.pin = pin;
+  }
+
+  /** Trạng thái liên kết: rớt sóng -> 'reconnecting' -> 'connected' lại hoặc 'lost' (hết 3 lần thử). */
+  public setLinkListener(fn: (state: 'connected' | 'reconnecting' | 'lost', name: string) => void): void {
+    this.linkListener = fn;
   }
 
   /** App đăng ký 1 lần: nhận mọi gói 'st' / 'cf' và kết quả lệnh. */
@@ -256,35 +295,13 @@ export class CitoBleManager {
         optionalServices: [CITO_BLE_SERVICE_UUID],
       });
 
+      if (this.device) this.device.removeEventListener('gattserverdisconnected', this.onDropped);
       this.device = device;
-      this.device.addEventListener('gattserverdisconnected', () => {
-        this.gattServer = null;
-        this.statusChar = null;
-        this.commandChar = null;
-        this.rxBuffer = '';
-        if (this.onDisconnectCallback) this.onDisconnectCallback();
-      });
-
-      // Connect to GATT
-      const server = await device.gatt.connect();
-      this.gattServer = server;
-
-      // Get Service & Characteristics
-      const service = await server.getPrimaryService(CITO_BLE_SERVICE_UUID);
-      this.statusChar = await service.getCharacteristic(CITO_BLE_CHAR_STATUS_UUID);
-      this.commandChar = await service.getCharacteristic(CITO_BLE_CHAR_COMMAND_UUID);
-
-      // Start notifications for live telemetry from ESP32
-      const decoder = new TextDecoder('utf-8');
-      this.rxBuffer = '';
-      this.statusChar.addEventListener('characteristicvaluechanged', (event: any) => {
-        // stream: true -> ký tự UTF-8 (tiếng Việt) bị cắt đôi giữa 2 gói vẫn ghép đúng
-        this.handleChunk(decoder.decode(event.target.value, { stream: true }));
-      });
-      await this.statusChar.startNotifications();
-
-      // Xác thực bằng mã PIN rồi xin gói cài đặt đầy đủ
-      await this.sendCommand('AUTH', { pin: this.pin });
+      this.userDisconnect = false;
+      device.removeEventListener('gattserverdisconnected', this.onDropped); // Quét lại cùng máy: không gắn trùng
+      device.addEventListener('gattserverdisconnected', this.onDropped);
+      await this.attach();
+      if (this.linkListener) this.linkListener('connected', device.name || 'CITO UF');
 
       return {
         id: device.id,
@@ -297,6 +314,50 @@ export class CitoBleManager {
       }
       throw err;
     }
+  }
+
+  /** Kết nối GATT, đăng ký notify, gửi PIN. Dùng cho lần đầu và khi tự kết nối lại. */
+  private async attach(): Promise<void> {
+    const server = await this.device.gatt.connect();
+    this.gattServer = server;
+    const service = await server.getPrimaryService(CITO_BLE_SERVICE_UUID);
+    this.statusChar = await service.getCharacteristic(CITO_BLE_CHAR_STATUS_UUID);
+    this.commandChar = await service.getCharacteristic(CITO_BLE_CHAR_COMMAND_UUID);
+    this.rxBuffer = '';
+    this.decoder = new TextDecoder('utf-8');
+    this.statusChar.removeEventListener('characteristicvaluechanged', this.onValue);
+    this.statusChar.addEventListener('characteristicvaluechanged', this.onValue);
+    await this.statusChar.startNotifications();
+    this.writeChain = Promise.resolve();
+    // Xác thực bằng mã PIN -> máy gửi cài đặt + nhật ký
+    await this.sendCommand('AUTH', { pin: this.pin });
+  }
+
+  /** Rớt sóng (đi ra xa, máy khởi động lại sau OTA...) -> thử kết nối lại 3 lần, không cần bấm quét. */
+  private async handleDropped(): Promise<void> {
+    this.gattServer = null;
+    this.statusChar = null;
+    this.commandChar = null;
+    this.rxBuffer = '';
+    if (this.userDisconnect || !this.device) {
+      if (this.onDisconnectCallback) this.onDisconnectCallback();
+      return;
+    }
+    const name = this.device.name || 'CITO UF';
+    if (this.linkListener) this.linkListener('reconnecting', name);
+    for (let i = 1; i <= 3; i++) {
+      await new Promise((r) => setTimeout(r, 2000 * i));
+      if (this.userDisconnect || !this.device) return;
+      try {
+        await this.attach();
+        if (this.linkListener) this.linkListener('connected', name);
+        return;
+      } catch (e) {
+        console.warn(`BLE reconnect ${i}/3 failed`, e);
+      }
+    }
+    if (this.linkListener) this.linkListener('lost', name);
+    if (this.onDisconnectCallback) this.onDisconnectCallback();
   }
 
   public async sendCommand(action: string, payload: any = {}): Promise<void> {
@@ -314,6 +375,7 @@ export class CitoBleManager {
   }
 
   public disconnect(): void {
+    this.userDisconnect = true;
     if (this.device && this.device.gatt && this.device.gatt.connected) {
       this.device.gatt.disconnect();
     }
