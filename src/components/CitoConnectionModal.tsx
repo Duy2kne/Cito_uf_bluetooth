@@ -130,7 +130,10 @@ export const CitoConnectionModal: React.FC<CitoConnectionModalProps> = ({
  *   RESET_ALL, TOGGLE_NIGHT_MODE, TOGGLE_SCREEN_SLEEP, SET_BUTTON_HOLD_TIME,
  *   SYNC_NTP, SET_RTC, SET_WIFI_CONFIG, CLEAR_WIFI, CALIBRATE_TDS,
  *   RESET_TDS_CALIBRATION, TOUCH_KEY {key}, SET_LOGO {effect,speedMs},
- *   OTA_CHECK {force}, SET_PIN {pin}, RESTART, GET_CONFIG
+ *   OTA_CHECK {force}, SET_PIN {pin}, RESTART, GET_CONFIG,
+ *   WIFI_SCAN, RESUME_AUTO (về lịch lọc tự động), GET_HISTORY, CLEAR_HISTORY
+ *
+ * Nhật ký: {"t":"hi"/"ev","e":[[thời_gian,loại,nguồn,giá_trị],...]} - 64 sự kiện gần nhất
  */
 `;
 
