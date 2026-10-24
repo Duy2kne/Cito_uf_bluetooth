@@ -189,6 +189,7 @@ export interface CitoSystemState {
   temperatureState?: TemperatureState; // Chỉ có khi nối máy thật; không có = số mẫu / mô phỏng
   wifiStaState?: number;      // 0 chưa cài, 1 đang kết nối, 2 đã kết nối, 3 không thấy mạng, 4 sai mật khẩu
   wifiScan?: WifiScanResult;  // Kết quả lệnh WIFI_SCAN gần nhất
+  rtcBatteryLow?: boolean;      // DS3231 báo mất giờ lúc khởi động (pin CR2032 yếu / hết)
   scheduleOverridden?: boolean; // Đã bật/tắt lọc bằng tay -> lịch lọc tự động TẠM DỪNG (RESUME_AUTO để chạy lại)
   ocHalted?: boolean;           // Đang DỪNG KHẨN CẤP do quá dòng - chờ OK
   filterSource?: FilterSource;
