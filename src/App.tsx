@@ -326,56 +326,137 @@ export default function App() {
     }
   };
 
+  // WiFi + chỉ số + giờ DS3231 + IP. compact = dòng phụ trên điện thoại (TDS/nhiệt độ đã có trên thanh dính)
+  const statusChips = (compact: boolean) => (
+    <>
+      <button
+        onClick={() => {
+          setActiveTab('web');
+          setTimeout(() => {
+            const el = document.getElementById('section-wifi-config');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }, 100);
+        }}
+        className="shrink-0 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-xs font-bold flex items-center gap-2 text-slate-200 transition-all shadow-md"
+        title="Cài đặt mạng WiFi cho máy CITO UF"
+      >
+        <Wifi className={`w-4 h-4 ${state.wifiConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
+        {!compact && <span>WiFi:</span>}
+        <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[120px]">{state.wifiSsid || 'Chưa cài'}</span>
+      </button>
+
+      <div className="flex items-center gap-2 text-xs font-mono shrink-0">
+        {!compact && (
+          <>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
+              <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="font-bold text-cyan-300">{state.tds} ppm</span>
+            </div>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
+              <Thermometer className="w-3.5 h-3.5 text-blue-400" />
+              <span className={`font-bold ${state.temperatureState === 'ERROR' ? 'text-red-400' : 'text-blue-300'}`}>
+                {formatTemperature(state)}
+              </span>
+            </div>
+          </>
+        )}
+
+        <div
+          className={`bg-slate-950 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 whitespace-nowrap ${
+            bleConnected && !state.rtcConnected
+              ? 'border-red-500/50'
+              : bleConnected && state.rtcBatteryLow
+                ? 'border-amber-500/50'
+                : 'border-slate-800'
+          }`}
+          title={
+            state.rtcBatteryLow
+              ? 'Giờ DS3231 - pin CR2032 yếu: máy từng mất giờ, hãy đồng bộ lại và thay pin'
+              : 'Giờ máy (DS3231)'
+          }
+        >
+          <Clock className={`w-3.5 h-3.5 ${bleConnected && !state.rtcConnected ? 'text-red-400' : 'text-indigo-400'}`} />
+          <span className={`font-bold text-[11px] ${bleConnected && !state.rtcConnected ? 'text-red-300' : 'text-indigo-200'}`}>
+            {bleConnected ? state.rtcTime : '--:--:--'}
+            {bleConnected && state.rtcBatteryLow ? ' ⚠' : ''}
+          </span>
+        </div>
+
+        <div className={`${compact ? 'flex' : 'hidden md:flex'} bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 items-center gap-1.5`}>
+          <Radio className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-slate-300 text-[11px]">{state.wifiConnected ? state.deviceIp : '-'}</span>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950">
-      {/* 1. Header Bar */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-30 shadow-2xl">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* 1. Header Bar
+          Điện thoại (< 640px): thanh dính CHỈ 1 DÒNG (logo · TDS/nhiệt độ · nút Bluetooth),
+          WiFi / giờ / IP nằm ở dòng phụ bên dưới và cuộn đi theo trang -> không chiếm chỗ khi cài đặt.
+          Máy tính (>= 640px): giữ nguyên 1 dòng đầy đủ như cũ. */}
+      <header className="bg-slate-900/95 backdrop-blur border-b border-slate-800 px-3 sm:px-4 py-2 sm:py-3 sticky top-0 z-30 shadow-2xl">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
           {/* Logo & System Title */}
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center font-black text-white text-base shadow-lg shadow-cyan-500/20">
-                <Droplets className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base font-black text-white tracking-tight">
-                    CITO UF SYSTEM
-                  </h1>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                    {bleConnected ? 'Bluetooth BLE' : 'ESP32 • Thủy Sinh'}
-                  </span>
-                  {bleConnected && state.firmwareVersion && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                      FW {state.firmwareVersion}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400">
-                  Điều Khiển Lọc Nước UF Bể Tép &amp; Thủy Sinh Qua Bluetooth / Web
-                </p>
-              </div>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center font-black text-white text-base shadow-lg shadow-cyan-500/20">
+              <Droplets className="w-4 h-4 sm:w-5 sm:h-5 animate-pulse" />
             </div>
-
-            {/* Mobile Bluetooth Button */}
-            <div className="sm:hidden">
-              <button
-                onClick={() => setIsConnectModalOpen(true)}
-                className={`p-2 rounded-xl border flex items-center gap-1.5 text-xs font-bold ${
-                  bleConnected
-                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                    : 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40'
-                }`}
-              >
-                <Bluetooth className="w-4 h-4" />
-                <span>{bleConnected ? 'BLE OK' : 'Bluetooth'}</span>
-              </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm sm:text-base font-black text-white tracking-tight whitespace-nowrap">
+                  CITO UF<span className="hidden sm:inline"> SYSTEM</span>
+                </h1>
+                <span className="hidden sm:inline text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                  {bleConnected ? 'Bluetooth BLE' : 'ESP32 • Thủy Sinh'}
+                </span>
+                {bleConnected && state.firmwareVersion && (
+                  <span className="hidden sm:inline text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    FW {state.firmwareVersion}
+                  </span>
+                )}
+              </div>
+              <p className="hidden sm:block text-xs text-slate-400">
+                Điều Khiển Lọc Nước UF Bể Tép &amp; Thủy Sinh Qua Bluetooth / Web
+              </p>
             </div>
           </div>
 
-          {/* Right: Bluetooth BLE Scan Button & Metrics */}
-          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
-            {/* Bluetooth BLE Scan Button */}
+          {/* ---- Điện thoại: TDS · nhiệt độ + nút Bluetooth chỉ có icon ---- */}
+          <div className="flex sm:hidden items-center gap-1.5 shrink-0">
+            <div className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 flex items-center gap-1.5 text-[11px] font-mono font-bold">
+              <span className="text-cyan-300">{state.tds}ppm</span>
+              <span className="text-slate-600">·</span>
+              <span className={state.temperatureState === 'ERROR' ? 'text-red-400' : 'text-blue-300'}>
+                {state.temperatureState === 'ERROR'
+                  ? 'Lỗi'
+                  : state.temperatureState === 'WAITING'
+                    ? '--'
+                    : `${state.temperature}°`}
+              </span>
+            </div>
+            <button
+              onClick={() => setIsConnectModalOpen(true)}
+              aria-label={bleConnected ? `Bluetooth: ${bleDeviceName}` : 'Quét Bluetooth gần máy'}
+              className={`w-9 h-9 rounded-xl border flex items-center justify-center ${
+                bleConnected
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
+                  : bleLink === 'reconnecting'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                    : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+              }`}
+            >
+              {bleConnected ? (
+                <BluetoothConnected className="w-4 h-4" />
+              ) : (
+                <Bluetooth className={`w-4 h-4 ${bleLink === 'reconnecting' ? 'animate-pulse' : ''}`} />
+              )}
+            </button>
+          </div>
+
+          {/* ---- Máy tính: đầy đủ như cũ ---- */}
+          <div className="hidden sm:flex items-center gap-2.5 justify-end flex-wrap">
             <button
               onClick={() => setIsConnectModalOpen(true)}
               className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all shadow-md ${
@@ -397,74 +478,15 @@ export default function App() {
                 </>
               )}
             </button>
-
-            {/* WiFi Status & Setup Button */}
-            <button
-              onClick={() => {
-                setActiveTab('web');
-                // Scroll to wifi config smoothly
-                setTimeout(() => {
-                  const el = document.getElementById('section-wifi-config');
-                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
-              }}
-              className="px-3.5 py-1.5 rounded-xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-xs font-bold flex items-center gap-2 text-slate-200 transition-all shadow-md"
-              title="Cài đặt mạng WiFi cho máy CITO UF"
-            >
-              <Wifi className={`w-4 h-4 ${state.wifiConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
-              <span>WiFi:</span>
-              <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[120px]">
-                {state.wifiSsid || 'Chưa cài'}
-              </span>
-            </button>
-
-            {/* Quick Metrics Bar */}
-            <div className="flex items-center gap-2 text-xs font-mono">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
-                <Droplets className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="font-bold text-cyan-300">{state.tds} ppm</span>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5">
-                <Thermometer className="w-3.5 h-3.5 text-blue-400" />
-                <span className={`font-bold ${state.temperatureState === 'ERROR' ? 'text-red-400' : 'text-blue-300'}`}>
-                  {formatTemperature(state)}
-                </span>
-              </div>
-
-              <div
-                className={`bg-slate-950 border rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 ${
-                  bleConnected && !state.rtcConnected
-                    ? 'border-red-500/50'
-                    : bleConnected && state.rtcBatteryLow
-                      ? 'border-amber-500/50'
-                      : 'border-slate-800'
-                }`}
-                title={
-                  state.rtcBatteryLow
-                    ? 'Giờ DS3231 - pin CR2032 yếu: máy từng mất giờ, hãy đồng bộ lại và thay pin'
-                    : 'Giờ máy (DS3231)'
-                }
-              >
-                <Clock className={`w-3.5 h-3.5 ${bleConnected && !state.rtcConnected ? 'text-red-400' : 'text-indigo-400'}`} />
-                <span
-                  className={`font-bold text-[11px] ${
-                    bleConnected && !state.rtcConnected ? 'text-red-300' : 'text-indigo-200'
-                  }`}
-                >
-                  {bleConnected ? state.rtcTime : '--:--:--'}
-                  {bleConnected && state.rtcBatteryLow ? ' ⚠' : ''}
-                </span>
-              </div>
-
-              <div className="hidden md:flex bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-slate-300 text-[11px]">{state.deviceIp}</span>
-              </div>
-            </div>
+            {statusChips(false)}
           </div>
         </div>
       </header>
+
+      {/* Điện thoại: WiFi / giờ / IP - KHÔNG dính, cuộn đi theo trang */}
+      <div className="sm:hidden bg-slate-900/60 border-b border-slate-800 px-3 py-2 flex items-center gap-2 overflow-x-auto">
+        {statusChips(true)}
+      </div>
 
       {/* Bluetooth Connection & Security PIN Modal */}
       <CitoConnectionModal
@@ -528,7 +550,7 @@ export default function App() {
       )}
 
       {/* 2. Navigation Tabs (Chỉ 2 Tab Điều Khiển) */}
-      <div className="bg-slate-900/90 border-b border-slate-800 sticky top-[60px] z-20 backdrop-blur">
+      <div className="bg-slate-900/90 border-b border-slate-800 sm:sticky sm:top-[68px] z-20 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between overflow-x-auto py-2">
           <nav className="flex items-center gap-2">
             <button
@@ -540,7 +562,8 @@ export default function App() {
               }`}
             >
               <Activity className="w-3.5 h-3.5" />
-              <span>1. Giao Diện Web Điều Khiển Toàn Diện</span>
+              <span className="sm:hidden">1. Điều khiển</span>
+              <span className="hidden sm:inline">1. Giao Diện Web Điều Khiển Toàn Diện</span>
             </button>
 
             <button
@@ -552,7 +575,8 @@ export default function App() {
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              <span>2. Mặt Máy Cảm Ứng (Phần Cứng)</span>
+              <span className="sm:hidden">2. Mặt máy</span>
+              <span className="hidden sm:inline">2. Mặt Máy Cảm Ứng (Phần Cứng)</span>
             </button>
           </nav>
 
