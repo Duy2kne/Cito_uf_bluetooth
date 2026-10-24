@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { WifiScanList } from './WifiScanList';
+import { HistoryPanel } from './HistoryPanel';
+import { LogoPanel } from './LogoPanel';
 import {
   Activity,
   AlertOctagon,
@@ -224,12 +226,25 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
               >
                 {state.isFiltering ? 'ĐANG LỌC' : 'TẮT'}
               </span>
-              {state.filterMode === 100 && state.isFiltering && (
-                <span className="text-[10px] text-amber-400 block font-mono">[Thủ công]</span>
+              {state.isFiltering && (
+                <span
+                  className={`text-[10px] block font-mono ${
+                    state.filterSource === 'MANUAL' ? 'text-amber-400' : 'text-emerald-400/80'
+                  }`}
+                >
+                  {state.filterSource === 'MANUAL'
+                    ? '[Bật tay]'
+                    : state.filterSource === 'SENSOR'
+                      ? '[Tự bật để đo TDS]'
+                      : state.filterSource === 'PRIMING'
+                        ? '[Mồi nước khởi động]'
+                        : '[Tự động theo lịch]'}
+                </span>
               )}
             </div>
-            <div className="text-[10px] text-slate-500 font-mono">
+            <div className={`text-[10px] font-mono ${state.scheduleOverridden ? 'text-amber-400' : 'text-slate-500'}`}>
               Lịch: Mode {state.filterMode}
+              {state.scheduleOverridden ? ' (TẠM DỪNG)' : ''}
             </div>
           </div>
 
@@ -733,6 +748,36 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
             Bật/tắt thiết bị chấp hành &amp; chế độ khẩn cấp
           </span>
         </div>
+
+        {state.ocHalted && (
+          <div className="p-3.5 rounded-2xl bg-red-950/60 border border-red-500/60 text-xs text-red-200 flex flex-wrap items-center justify-between gap-3">
+            <span>
+              <strong className="text-red-300">⛔ MÁY ĐANG DỪNG KHẨN CẤP DO QUÁ DÒNG.</strong> Bơm và van bị khóa, không bật
+              được từ app. Kiểm tra bơm / van rồi bấm Xóa lỗi.
+            </span>
+            <button
+              onClick={() => onAction('RESET_OK')}
+              className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold"
+            >
+              Xóa lỗi (OK)
+            </button>
+          </div>
+        )}
+
+        {state.scheduleOverridden && !state.ocHalted && (
+          <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/50 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3">
+            <span>
+              <strong className="text-amber-300">⏸ Lịch lọc tự động đang TẠM DỪNG</strong> vì lọc đã được bật/tắt bằng tay (app
+              hoặc nút LỌC trên máy). Máy {state.isFiltering ? 'sẽ lọc liên tục' : 'sẽ KHÔNG tự lọc'} cho tới khi về lịch.
+            </span>
+            <button
+              onClick={() => onAction('RESUME_AUTO')}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold"
+            >
+              ▶ Về lịch tự động
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {/* Toggle Lọc */}
@@ -1396,6 +1441,12 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      <HistoryPanel history={state.history} connected={!!state.firmwareVersion} onAction={onAction} />
+
+      {state.firmwareVersion && (
+        <LogoPanel effect={state.logoEffect} speedMs={state.logoSpeed} onAction={onAction} />
+      )}
     </div>
   );
 };
