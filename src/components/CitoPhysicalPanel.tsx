@@ -22,10 +22,13 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
   state,
   onAction,
 }) => {
-  const [holdingBtn, setHoldingBtn] = useState<string | null>(null);
-  const [holdStage, setHoldStage] = useState<string>(''); // '', '-', '--', '---'
-  const [holdTimer, setHoldTimer] = useState<any>(null);
-  const hasTriggeredRef = useRef(false);
+  // Web: chạm / bấm là gửi lệnh NGAY, không bắt giữ như nút cảm ứng trên máy
+  // (giữ lâu trên điện thoại hay bị cuộn trang / hiện menu -> hụt lệnh, rất khó dùng).
+  // Chức năng phải giữ nút trên máy (xả áp, khôi phục gốc) có nút bấm riêng bên dưới.
+  const [pressedBtn, setPressedBtn] = useState<string | null>(null);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Máy thật: SETTING / UP / DOWN là menu trên máy, firmware không nhận từ xa -> chỉnh ở web
+  const realDevice = !!state.firmwareVersion;
 
   const {
     isFiltering,
@@ -60,75 +63,11 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
   // LED Screen visibility: Hidden if night mode is ON, or if sleeping and screenWhenSleeping is FALSE
   const isDisplayOff = nightMode || (isSleeping && !screenWhenSleeping);
 
-  // Touch button handler with realistic hold detection (- -> -- -> --- + auto trigger on 850ms)
-  const handleTouchStart = (key: string) => {
-    hasTriggeredRef.current = false;
-    setHoldingBtn(key);
-    setHoldStage('-');
-
-    const timer1 = setTimeout(() => {
-      setHoldStage('--');
-    }, 300);
-
-    const timer2 = setTimeout(() => {
-      setHoldStage('---');
-    }, 600);
-
-    // Kích hoạt ngay khi giữ đủ thời gian (850ms) mà người dùng không cần phải nhả tay mới ăn lệnh
-    const timer3 = setTimeout(() => {
-      hasTriggeredRef.current = true;
-      setHoldStage('');
-      onAction('TOUCH_KEY', { key });
-    }, 850);
-
-    setHoldTimer({ timer1, timer2, timer3, startTime: Date.now() });
-  };
-
-  const handleTouchEnd = (key: string) => {
-    if (!holdingBtn) return;
-    const holdDuration = holdTimer ? Date.now() - holdTimer.startTime : 0;
-    if (holdTimer) {
-      clearTimeout(holdTimer.timer1);
-      clearTimeout(holdTimer.timer2);
-      clearTimeout(holdTimer.timer3);
-    }
-    setHoldingBtn(null);
-    setHoldStage('');
-
-    // If held for >= 5 seconds on LOC -> Toggle Dry Run (drn) - chỉ có ở bản mô phỏng, firmware thật không có
-    if (key === 'LOC' && holdDuration >= 4800) {
-      if (!state.firmwareVersion) onAction('TOGGLE_DRY_RUN');
-      return;
-    }
-
-    // Kiểm tra 10s TRƯỚC 5s: trước đây điều kiện 5s chạy trước nên giữ 10s không bao giờ ra Reset
-    // If held for >= 10 seconds on OK -> Reset all (rES)
-    if (key === 'OK' && holdDuration >= 9500) {
-      if (window.confirm('Giữ OK 10 giây = KHÔI PHỤC TOÀN BỘ CÀI ĐẶT GỐC. Tiếp tục?')) onAction('RESET_ALL');
-      return;
-    }
-
-    // If held for >= 5 seconds on OK -> Pressure Release (XAP)
-    if (key === 'OK' && holdDuration >= 4800) {
-      onAction('RELEASE_PRESSURE');
-      return;
-    }
-
-    // Nếu nhả ra sớm (click/chạm thông thường), kích hoạt lệnh ngay tức khắc
-    if (!hasTriggeredRef.current) {
-      hasTriggeredRef.current = true;
-      onAction('TOUCH_KEY', { key });
-    }
-  };
-
-  const handleTouchCancel = () => {
-    if (holdTimer) {
-      clearTimeout(holdTimer.timer1);
-      clearTimeout(holdTimer.timer2);
-      clearTimeout(holdTimer.timer3);
-    }
-    setHoldingBtn(null);
-    setHoldStage('');
+  const press = (key: string) => {
+    setPressedBtn(key);
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => setPressedBtn(null), 250); // Nháy sáng nút cho biết đã nhận
+    onAction('TOUCH_KEY', { key });
   };
 
   return (
@@ -142,7 +81,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           </h2>
         </div>
         <div className="text-xs text-slate-400 font-mono hidden sm:block">
-          Giữ nút 1s (màn hình đếm - ➔ -- ➔ ---) để thực hiện lệnh
+          Chạm / bấm 1 lần là chạy ngay (không cần giữ)
         </div>
       </div>
 
@@ -197,14 +136,9 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           {/* Button LOC */}
           <div className="flex flex-col items-center gap-1.5">
             <button
-              onMouseDown={() => handleTouchStart('LOC')}
-              onMouseUp={() => handleTouchEnd('LOC')}
-              onMouseLeave={handleTouchCancel}
-              onTouchStart={() => handleTouchStart('LOC')}
-              onTouchEnd={() => handleTouchEnd('LOC')}
-              onTouchCancel={handleTouchCancel}
+              onClick={() => press('LOC')}
               className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
-                holdingBtn === 'LOC'
+                pressedBtn === 'LOC'
                   ? 'bg-cyan-500/30 border-cyan-400 text-white'
                   : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-200'
               }`}
@@ -231,14 +165,9 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           {/* Button XẢ */}
           <div className="flex flex-col items-center gap-1.5">
             <button
-              onMouseDown={() => handleTouchStart('XA')}
-              onMouseUp={() => handleTouchEnd('XA')}
-              onMouseLeave={handleTouchCancel}
-              onTouchStart={() => handleTouchStart('XA')}
-              onTouchEnd={() => handleTouchEnd('XA')}
-              onTouchCancel={handleTouchCancel}
+              onClick={() => press('XA')}
               className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
-                holdingBtn === 'XA'
+                pressedBtn === 'XA'
                   ? 'bg-amber-500/30 border-amber-400 text-white'
                   : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-200'
               }`}
@@ -302,8 +231,6 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
               className={`font-mono text-5xl md:text-6xl font-black tracking-widest text-center select-none ${
                 isDisplayOff
                   ? 'text-slate-900'
-                  : holdStage
-                  ? 'text-cyan-400 animate-pulse'
                   : display7Segment.includes('Err') ||
                     display7Segment === '222' ||
                     display7Segment === '666'
@@ -313,7 +240,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
                   : 'text-red-500 drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]'
               }`}
             >
-              {isDisplayOff ? '   ' : holdStage || display7Segment}
+              {isDisplayOff ? '   ' : display7Segment}
             </span>
           </div>
 
@@ -337,14 +264,9 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
             return (
               <div key={modeKey} className="flex flex-col items-center gap-1.5">
                 <button
-                  onMouseDown={() => handleTouchStart(modeKey)}
-                  onMouseUp={() => handleTouchEnd(modeKey)}
-                  onMouseLeave={handleTouchCancel}
-                  onTouchStart={() => handleTouchStart(modeKey)}
-                  onTouchEnd={() => handleTouchEnd(modeKey)}
-                  onTouchCancel={handleTouchCancel}
+                  onClick={() => press(modeKey)}
                   className={`w-full py-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
-                    holdingBtn === modeKey
+                    pressedBtn === modeKey
                       ? 'bg-blue-500/30 border-blue-400 text-white'
                       : isSelected
                       ? 'bg-blue-950/60 border-blue-500 text-white shadow-md shadow-blue-500/20'
@@ -376,14 +298,10 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           {/* SETTING */}
           <div className="flex flex-col items-center gap-1">
             <button
-              onMouseDown={() => handleTouchStart('SETTING')}
-              onMouseUp={() => handleTouchEnd('SETTING')}
-              onMouseLeave={handleTouchCancel}
-              onTouchStart={() => handleTouchStart('SETTING')}
-              onTouchEnd={() => handleTouchEnd('SETTING')}
-              onTouchCancel={handleTouchCancel}
-              className={`w-full py-2.5 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
-                holdingBtn === 'SETTING'
+              onClick={() => press('SETTING')}
+              disabled={realDevice}
+              className={`w-full disabled:opacity-40 disabled:cursor-not-allowed py-2.5 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
+                pressedBtn === 'SETTING'
                   ? 'bg-purple-500/30 border-purple-400 text-white'
                   : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-300'
               }`}
@@ -391,48 +309,45 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
               <span className="text-[11px] font-bold">SETTING</span>
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  holdingBtn === 'SETTING' ? 'bg-purple-400 animate-ping' : 'bg-slate-800'
+                  pressedBtn === 'SETTING' ? 'bg-purple-400 animate-ping' : 'bg-slate-800'
                 }`}
               />
             </button>
-            <span className="text-[9px] text-slate-400 font-mono">Giữ 5s menu</span>
+            <span className="text-[9px] text-slate-400 font-mono">{realDevice ? 'Chỉnh ở web' : 'Menu'}</span>
           </div>
 
           {/* ▲ UP */}
           <div className="flex flex-col items-center gap-1">
             <button
-              onClick={() => onAction('TOUCH_KEY', { key: 'UP' })}
-              className="w-full py-2.5 rounded-2xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-slate-300 flex flex-col items-center justify-center gap-1 active:scale-95"
+              onClick={() => press('UP')}
+              disabled={realDevice}
+              className="w-full disabled:opacity-40 disabled:cursor-not-allowed py-2.5 rounded-2xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-slate-300 flex flex-col items-center justify-center gap-1 active:scale-95"
             >
               <span className="text-[11px] font-bold">▲ UP</span>
               <span className="w-1.5 h-1.5 rounded-full bg-slate-800" />
             </button>
-            <span className="text-[9px] text-slate-400 font-mono">Tăng số</span>
+            <span className="text-[9px] text-slate-400 font-mono">{realDevice ? 'Chỉnh ở web' : 'Tăng số'}</span>
           </div>
 
           {/* ▼ DOWN */}
           <div className="flex flex-col items-center gap-1">
             <button
-              onClick={() => onAction('TOUCH_KEY', { key: 'DOWN' })}
-              className="w-full py-2.5 rounded-2xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-slate-300 flex flex-col items-center justify-center gap-1 active:scale-95"
+              onClick={() => press('DOWN')}
+              disabled={realDevice}
+              className="w-full disabled:opacity-40 disabled:cursor-not-allowed py-2.5 rounded-2xl border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-slate-300 flex flex-col items-center justify-center gap-1 active:scale-95"
             >
               <span className="text-[11px] font-bold">▼ DOWN</span>
               <span className="w-1.5 h-1.5 rounded-full bg-slate-800" />
             </button>
-            <span className="text-[9px] text-slate-400 font-mono">Giảm số</span>
+            <span className="text-[9px] text-slate-400 font-mono">{realDevice ? 'Chỉnh ở web' : 'Giảm số'}</span>
           </div>
 
           {/* OK */}
           <div className="flex flex-col items-center gap-1">
             <button
-              onMouseDown={() => handleTouchStart('OK')}
-              onMouseUp={() => handleTouchEnd('OK')}
-              onMouseLeave={handleTouchCancel}
-              onTouchStart={() => handleTouchStart('OK')}
-              onTouchEnd={() => handleTouchEnd('OK')}
-              onTouchCancel={handleTouchCancel}
+              onClick={() => press('OK')}
               className={`w-full py-2.5 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
-                holdingBtn === 'OK'
+                pressedBtn === 'OK'
                   ? 'bg-emerald-500/30 border-emerald-400 text-white'
                   : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-300'
               }`}
@@ -440,7 +355,7 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
               <span className="text-[11px] font-bold">OK</span>
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  holdingBtn === 'OK' ? 'bg-emerald-400 animate-ping' : 'bg-slate-800'
+                  pressedBtn === 'OK' ? 'bg-emerald-400 animate-ping' : 'bg-slate-800'
                 }`}
               />
             </button>
@@ -451,19 +366,19 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
 
       {/* Quick shortcuts under panel */}
       <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs text-slate-400">
-        <span className="text-slate-400">Thao tác nhanh trên máy:</span>
+        <span className="text-slate-400">Chức năng phải giữ nút trên máy - ở web bấm 1 lần:</span>
         <button
           onClick={() => onAction('RELEASE_PRESSURE')}
           className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-all"
         >
-          Xả áp suất (Giữ OK 5s)
+          Xả áp suất XAP (máy: giữ OK 5s)
         </button>
         {!state.firmwareVersion && (
           <button
             onClick={() => onAction('TOGGLE_DRY_RUN')}
             className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-all"
           >
-            Bơm khô drn (Giữ LỌC 5s - mô phỏng)
+            Bơm khô drn (mô phỏng)
           </button>
         )}
         <button
@@ -471,6 +386,14 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
           className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] transition-all"
         >
           Xóa lỗi / Cảnh báo (Nhấn OK)
+        </button>
+        <button
+          onClick={() => {
+            if (window.confirm('KHÔI PHỤC TOÀN BỘ CÀI ĐẶT GỐC cho máy CITO UF? (máy: giữ OK 10 giây)')) onAction('RESET_ALL');
+          }}
+          className="px-2.5 py-1 rounded-lg bg-red-950/60 border border-red-500/30 text-red-300 font-mono text-[11px] transition-all"
+        >
+          Khôi phục gốc rES (máy: giữ OK 10s)
         </button>
       </div>
     </div>
