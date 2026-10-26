@@ -132,6 +132,7 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     s.isFlushing = !!pkt.drn;
     s.isPressureRelease = !!pkt.prl;
     s.isPriming = !!pkt.pri;
+    s.primingLeftSec = pkt.pri ? Number(pkt.prs) || 0 : 0;
     s.isSleeping = !!pkt.slp;
     s.isDryRun = false; // Firmware không có chế độ bơm khô
     s.pumpCurrentMa = pkt.pma ?? 0;
