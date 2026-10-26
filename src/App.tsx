@@ -8,6 +8,7 @@ import {
   Cpu,
   Droplets,
   Radio,
+  Settings,
   ShieldCheck,
   Thermometer,
   Wifi,
@@ -57,13 +58,13 @@ const INITIAL_CITO_STATE: CitoSystemState = {
   pumpType: 'SMALL',
   pumpThresholdsSmall: {
     minCurrentMa: 40,
-    dirtyFilterMa: 350, // Lọc bẩn bơm nhỏ: 350 mA
-    overCurrentMa: 700, // Quá dòng bơm nhỏ: 700 mA
+    dirtyFilterMa: 750, // Lọc bẩn bơm nhỏ: 750 mA (khảo sát)
+    overCurrentMa: 1200, // Quá dòng bơm nhỏ: 1200 mA
   },
   pumpThresholdsLarge: {
     minCurrentMa: 80,
-    dirtyFilterMa: 450, // Lọc bẩn bơm lớn: 450 mA
-    overCurrentMa: 800, // Quá dòng bơm lớn: 800 mA
+    dirtyFilterMa: 800, // Lọc bẩn bơm lớn: 800 mA (khảo sát)
+    overCurrentMa: 1200, // Quá dòng bơm lớn: 1200 mA
   },
   valveThresholds: {
     minCurrentMa: 80,
@@ -148,7 +149,7 @@ export default function App() {
   const bleConnectedRef = useRef(false);
   bleConnectedRef.current = bleConnected;
 
-  const [activeTab, setActiveTab] = useState<'panel' | 'web'>('web');
+  const [activeTab, setActiveTab] = useState<'panel' | 'web' | 'settings'>('web');
   const [networkError, setNetworkError] = useState(false);
   // Server mô phỏng (server.ts): null = đang dò, true = có (npm run dev), false = không có
   // (web tĩnh trên GitHub Pages -> chỉ điều khiển máy thật qua Bluetooth)
@@ -331,7 +332,7 @@ export default function App() {
     <>
       <button
         onClick={() => {
-          setActiveTab('web');
+          setActiveTab('settings');
           setTimeout(() => {
             const el = document.getElementById('section-wifi-config');
             if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -551,11 +552,11 @@ export default function App() {
 
       {/* 2. Navigation Tabs (Chỉ 2 Tab Điều Khiển) */}
       <div className="bg-slate-900/90 border-b border-slate-800 sm:sticky sm:top-[68px] z-20 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between overflow-x-auto py-2">
-          <nav className="flex items-center gap-2">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 flex items-center justify-between overflow-x-auto py-2">
+          <nav className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={() => setActiveTab('web')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap ${
                 activeTab === 'web'
                   ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -568,7 +569,7 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('panel')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap ${
                 activeTab === 'panel'
                   ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -577,6 +578,19 @@ export default function App() {
               <Cpu className="w-3.5 h-3.5" />
               <span className="sm:hidden">2. Mặt máy</span>
               <span className="hidden sm:inline">2. Mặt Máy Cảm Ứng (Phần Cứng)</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap ${
+                activeTab === 'settings'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span className="sm:hidden">3. Cài đặt</span>
+              <span className="hidden sm:inline">3. Cài Đặt Máy (TDS · WiFi · Giờ · Logo)</span>
             </button>
           </nav>
 
@@ -611,6 +625,11 @@ export default function App() {
 
         {activeTab === 'web' && (
           <CitoWebDashboard state={state} onAction={sendAction} />
+        )}
+
+        {/* Trang Cài đặt máy: hiệu chuẩn TDS, WiFi, giờ RTC, đèn logo - tách riêng cho đỡ rối */}
+        {activeTab === 'settings' && (
+          <CitoWebDashboard state={state} onAction={sendAction} page="settings" />
         )}
       </main>
 
