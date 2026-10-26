@@ -33,6 +33,8 @@ const EV = {
   FILTER_MODE: 17,
   SCHED_PAUSE: 18,
   TDS_CAL: 19,
+  FILTER_RUN: 20, // Lọc xong: t = lúc tắt, val = số giây đã lọc, src = ai bật
+  DRAIN_RUN: 21, // Xả xong
 };
 
 const SRC_LABEL = [
@@ -108,13 +110,23 @@ export function parseHistory(raw: any): HistoryEvent[] {
 export function isAutoEvent(e: HistoryEvent): boolean {
   return (
     AUTO_SRC.has(e.src) &&
-    [EV.FILTER_ON, EV.FILTER_OFF, EV.DRAIN_ON, EV.DRAIN_OFF, EV.PREL_OFF, EV.FILTER_MODE, EV.SCHED_PAUSE].includes(e.type)
+    [
+      EV.FILTER_ON,
+      EV.FILTER_OFF,
+      EV.DRAIN_ON,
+      EV.DRAIN_OFF,
+      EV.FILTER_RUN,
+      EV.DRAIN_RUN,
+      EV.PREL_OFF,
+      EV.FILTER_MODE,
+      EV.SCHED_PAUSE,
+    ].includes(e.type)
   );
 }
 
 export function eventCategory(e: HistoryEvent): HistoryCategory {
-  if (e.type === EV.FILTER_ON || e.type === EV.FILTER_OFF) return 'filter';
-  if ([EV.DRAIN_ON, EV.DRAIN_OFF, EV.PREL_ON, EV.PREL_OFF].includes(e.type)) return 'drain';
+  if ([EV.FILTER_ON, EV.FILTER_OFF, EV.FILTER_RUN].includes(e.type)) return 'filter';
+  if ([EV.DRAIN_ON, EV.DRAIN_OFF, EV.DRAIN_RUN, EV.PREL_ON, EV.PREL_OFF].includes(e.type)) return 'drain';
   if ([EV.ERR_SET, EV.OC_HALT, EV.ERR_CLEAR, EV.OC_RESUME].includes(e.type)) return 'error';
   if ([EV.TDS_MODE, EV.FILTER_MODE, EV.SCHED_PAUSE, EV.TDS_CAL, EV.SETTINGS_RESET].includes(e.type)) return 'setting';
   return 'system';
@@ -128,6 +140,13 @@ export function isAlarmEvent(e: HistoryEvent): boolean {
     (e.type === EV.PRIMING_END && e.val === 1) ||
     (e.type === EV.BOOT && [4, 5, 6, 7, 9].includes(e.src))
   );
+}
+
+/** Giờ bắt đầu của 1 lần lọc / xả (t = lúc tắt, val = số giây chạy) -> "23:00". */
+function startClock(e: HistoryEvent): string {
+  if (e.t & 0x80000000 || e.val > e.t) return '';
+  const d = new Date((e.t - e.val) * 1000);
+  return `từ ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}, `;
 }
 
 export function formatEventTime(t: number): string {
@@ -155,8 +174,12 @@ export function describeEvent(e: HistoryEvent): string {
       return `Bật xả - ${by} (TDS ${e.val} ppm)`;
     case EV.DRAIN_OFF:
       return `Tắt xả - ${by} (đã xả ${dur(e.val)})`;
+    case EV.FILTER_RUN:
+      return `Lọc ${dur(e.val)} (${startClock(e)}${by})`;
+    case EV.DRAIN_RUN:
+      return `Xả ${dur(e.val)} (${startClock(e)}${by})`;
     case EV.PREL_ON:
-      return `Xả áp suất - ${by}`;
+      return `Xả áp suất 30 giây - ${by}`;
     case EV.PREL_OFF:
       return `Kết thúc xả áp - ${by}`;
     case EV.ERR_SET:
