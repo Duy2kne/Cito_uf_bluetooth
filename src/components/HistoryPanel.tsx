@@ -33,7 +33,7 @@ const ICON: Record<HistoryCategory, React.ReactNode> = {
   system: <Zap className="w-3.5 h-3.5 text-slate-400" />,
 };
 
-/** 12. Nhật ký hoạt động gần nhất (máy lưu 64 sự kiện trong bộ nhớ NVS). */
+/** 8. Nhật ký hoạt động gần nhất (máy lưu 64 sự kiện trong bộ nhớ NVS). */
 export function HistoryPanel({ history, connected, onAction }: HistoryPanelProps) {
   const [filter, setFilter] = useState<'all' | HistoryCategory>('all');
   const list = (history || []).filter((e) => filter === 'all' || eventCategory(e) === filter);
@@ -45,7 +45,7 @@ export function HistoryPanel({ history, connected, onAction }: HistoryPanelProps
         <div>
           <h3 className="text-base font-black text-white flex items-center gap-2">
             <History className="w-5 h-5 text-cyan-400" />
-            12. NHẬT KÝ HOẠT ĐỘNG GẦN NHẤT
+            8. NHẬT KÝ HOẠT ĐỘNG GẦN NHẤT
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
             Máy tự ghi {history?.length ?? 0}/64 sự kiện gần nhất (lọc, xả, lỗi, khởi động, OTA...), không mất khi cúp điện
