@@ -12,8 +12,8 @@ export interface TdsThreshold {
 
 export interface PumpThresholds {
   minCurrentMa: number;    // Dòng tối thiểu (mA) -> thấp hơn báo lỗi bơm hỏng 111 (nhỏ: 40, lớn: 80)
-  dirtyFilterMa: number;   // Ngưỡng lọc bẩn (mA) -> vượt báo FLt (nhỏ: 350, lớn: 450)
-  overCurrentMa: number;   // Ngưỡng quá dòng (mA) -> vượt dừng khẩn cấp 222 (nhỏ: 700, lớn: 800)
+  dirtyFilterMa: number;   // Ngưỡng lọc bẩn (mA) -> vượt báo FLt (nhỏ: 750, lớn: 800)
+  overCurrentMa: number;   // Ngưỡng quá dòng (mA) -> vượt dừng khẩn cấp 222 (nhỏ: 1200, lớn: 1200)
 }
 
 export const TDS_MODE_LABELS: Record<TdsMode, string> = {
@@ -95,6 +95,7 @@ export interface CitoSystemState {
   isPressureRelease: boolean; // Đang xả áp suất (30s)
   isDryRun: boolean;          // Bơm khô (drn)
   isPriming: boolean;         // Đang mồi nước (Prt)
+  primingLeftSec?: number;    // Mồi nước khởi động: còn bao nhiêu giây (0 = đang chờ cảm biến báo có nước)
   isManualFilter: boolean;    // Đang lọc do người dùng bật tay (mode 100)
   manualFilterCountdown: number; // Đếm ngược 30s khi tắt lọc tay trong mode 100 -> tự về 103
 
