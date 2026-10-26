@@ -272,14 +272,16 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
             <div className="my-1">
               <span
                 className={`text-lg font-black font-mono ${
-                  state.isFlushing ? 'text-amber-400 animate-pulse' : 'text-slate-500'
+                  state.isFlushing || state.isPressureRelease ? 'text-amber-400 animate-pulse' : 'text-slate-500'
                 }`}
               >
-                {state.isFlushing ? 'ĐANG XẢ' : 'TẮT'}
+                {state.isPressureRelease ? 'XẢ ÁP' : state.isFlushing ? 'ĐANG XẢ' : 'TẮT'}
               </span>
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              {state.cooldownSecondsRemaining > 0
+              {state.isPressureRelease
+                ? `Mở 2 van, bơm tắt${state.prelLeftSec ? ` - còn ${state.prelLeftSec}s` : ''}`
+                : state.cooldownSecondsRemaining > 0
                 ? `Cooldown: ${Math.round(state.cooldownSecondsRemaining / 60)}p`
                 : 'Sẵn sàng xả'}
             </div>
@@ -506,12 +508,20 @@ export const CitoWebDashboard: React.FC<CitoWebDashboardProps> = ({
             </button>
 
             <button
-              onClick={() => onAction('RELEASE_PRESSURE')}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center gap-1.5"
+              onClick={() => onAction(state.isPressureRelease ? 'STOP_PRESSURE_RELEASE' : 'RELEASE_PRESSURE')}
+              className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 ${
+                state.isPressureRelease
+                  ? 'bg-amber-500/20 border border-amber-400 text-amber-300 animate-pulse'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              }`}
               title="Mở cả 2 van, bơm tắt trong 30 giây để tháo lắp màng"
             >
               <Wrench className="w-3.5 h-3.5 text-amber-400" />
-              <span>Xả Áp Suất (XAP)</span>
+              <span>
+                {state.isPressureRelease
+                  ? `Đang xả áp${state.prelLeftSec ? ` ${state.prelLeftSec}s` : ''} - bấm để dừng`
+                  : 'Xả Áp Suất (XAP)'}
+              </span>
             </button>
 
             <button
