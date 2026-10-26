@@ -36,6 +36,20 @@
     }
   }
 
+  /* Màn 7 đoạn nháy tắt / sáng như máy (disp_set_blink 500ms: XAP 0.5s sáng, 0.5s tắt) */
+  @keyframes segBlink {
+    0%, 49.9% {
+      opacity: 1;
+    }
+    50%, 100% {
+      opacity: 0;
+    }
+  }
+
+  .animate-seg-blink {
+    animation: segBlink 1s step-end infinite;
+  }
+
   .pipe-flow-active {
     stroke-dasharray: 6 6;
     animation: flowDash 1s linear infinite;
