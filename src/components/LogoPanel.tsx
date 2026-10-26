@@ -9,7 +9,7 @@ interface LogoPanelProps {
 
 const EFFECTS = ['Tắt', 'Một màu', 'Cầu vồng', 'Nhấp nháy', 'Thở', 'Đuổi', 'Lấp đầy', 'Lấp lánh'];
 
-/** 13. LED logo (WS2812). Chỉ chạy khi máy rảnh - lúc lọc/xả/menu máy tự hiện hiệu ứng trạng thái. */
+/** Trang Cài đặt 5. LED logo (WS2812). Chỉ chạy khi máy rảnh - lúc lọc/xả/menu máy tự hiện hiệu ứng trạng thái. */
 export function LogoPanel({ effect, speedMs, onAction }: LogoPanelProps) {
   const [speed, setSpeed] = useState(speedMs >= 20 ? speedMs : 180);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,7 +43,7 @@ export function LogoPanel({ effect, speedMs, onAction }: LogoPanelProps) {
       <div className="border-b border-slate-800 pb-3">
         <h3 className="text-base font-black text-white flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-pink-400" />
-          13. ĐÈN LED LOGO
+          5. ĐÈN LED LOGO
         </h3>
         <p className="text-xs text-slate-400 mt-0.5">
           Logo chỉ sáng khi máy đang lọc / xả / xả áp và 5 giây lúc mở máy (máy rảnh thì tắt). Hiệu ứng chọn ở đây dùng cho những lúc đó.
