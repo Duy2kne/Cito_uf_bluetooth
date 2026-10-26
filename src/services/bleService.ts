@@ -131,6 +131,7 @@ export function applyBlePacket(prev: CitoSystemState, pkt: any): CitoSystemState
     s.isFiltering = !!pkt.flt;
     s.isFlushing = !!pkt.drn;
     s.isPressureRelease = !!pkt.prl;
+    s.prelLeftSec = pkt.prl ? Number(pkt.pls) || 0 : 0;
     s.isPriming = !!pkt.pri;
     s.primingLeftSec = pkt.pri ? Number(pkt.prs) || 0 : 0;
     s.isSleeping = !!pkt.slp;
