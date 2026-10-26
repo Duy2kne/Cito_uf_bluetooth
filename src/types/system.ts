@@ -93,6 +93,7 @@ export interface CitoSystemState {
   isFiltering: boolean;       // Đang lọc
   isFlushing: boolean;        // Đang xả nước
   isPressureRelease: boolean; // Đang xả áp suất (30s)
+  prelLeftSec?: number;       // Xả áp: còn bao nhiêu giây
   isDryRun: boolean;          // Bơm khô (drn)
   isPriming: boolean;         // Đang mồi nước (Prt)
   primingLeftSec?: number;    // Mồi nước khởi động: còn bao nhiêu giây (0 = đang chờ cảm biến báo có nước)
