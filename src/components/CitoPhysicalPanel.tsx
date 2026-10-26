@@ -368,10 +368,12 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
       <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs text-slate-400">
         <span className="text-slate-400">Chức năng phải giữ nút trên máy - ở web bấm 1 lần:</span>
         <button
-          onClick={() => onAction('RELEASE_PRESSURE')}
+          onClick={() => onAction(state.isPressureRelease ? 'STOP_PRESSURE_RELEASE' : 'RELEASE_PRESSURE')}
           className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-all"
         >
-          Xả áp suất XAP (máy: giữ OK 5s)
+          {state.isPressureRelease
+            ? `Đang xả áp${state.prelLeftSec ? ` ${state.prelLeftSec}s` : ''} - bấm để dừng`
+            : 'Xả áp suất XAP (máy: giữ OK 5s)'}
         </button>
         {!state.firmwareVersion && (
           <button
