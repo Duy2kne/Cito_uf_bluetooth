@@ -101,7 +101,7 @@ const splitDur = (s: number) => ({ flushMinutes: Math.floor(s / 60), flushSecond
 
 function display7(s: CitoSystemState, err: number, oc: boolean): string {
   const blink = Math.floor(Date.now() / 1000) % 2 === 0;
-  if (s.isPressureRelease) return blink ? 'XAP' : '---';
+  if (s.isPressureRelease) return 'XAP'; // Máy: XAP nháy tắt/sáng 0.5s - mặt máy web nháy bằng CSS
   if (s.isPriming) return 'Prt';
   if (oc) return blink ? 'Err' : err & ERR.VALVE_OVERCURRENT ? '666' : '222';
   if (err & ERR.PUMP) return blink ? 'Err' : '111';
