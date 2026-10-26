@@ -231,6 +231,8 @@ export const CitoPhysicalPanel: React.FC<CitoPhysicalPanelProps> = ({
               className={`font-mono text-5xl md:text-6xl font-black tracking-widest text-center select-none ${
                 isDisplayOff
                   ? 'text-slate-900'
+                  : display7Segment === 'XAP'
+                  ? 'text-red-500 drop-shadow-[0_0_12px_rgba(239,68,68,0.8)] animate-seg-blink'
                   : display7Segment.includes('Err') ||
                     display7Segment === '222' ||
                     display7Segment === '666'
