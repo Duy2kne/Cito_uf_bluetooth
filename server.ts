@@ -54,13 +54,13 @@ function createInitialState(custom: Partial<CitoSystemState> = {}): CitoSystemSt
     pumpType: 'SMALL',
     pumpThresholdsSmall: {
       minCurrentMa: 40,
-      dirtyFilterMa: 350, // Lọc bẩn bơm nhỏ = 350 mA (FLt)
-      overCurrentMa: 700, // Quá dòng bơm nhỏ = 700 mA (ngắt 222)
+      dirtyFilterMa: 750, // Lọc bẩn bơm nhỏ = 750 mA (FLt)
+      overCurrentMa: 1200, // Quá dòng bơm nhỏ = 1200 mA (ngắt 222)
     },
     pumpThresholdsLarge: {
       minCurrentMa: 80,
-      dirtyFilterMa: 450, // Lọc bẩn bơm lớn = 450 mA (FLt)
-      overCurrentMa: 800, // Quá dòng bơm lớn = 800 mA (ngắt 222)
+      dirtyFilterMa: 800, // Lọc bẩn bơm lớn = 800 mA (FLt)
+      overCurrentMa: 1200, // Quá dòng bơm lớn = 1200 mA (ngắt 222)
     },
     valveThresholds: {
       minCurrentMa: 80,
